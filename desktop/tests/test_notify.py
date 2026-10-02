@@ -84,6 +84,11 @@ def fake_windows_toasts(monkeypatch):
         def show_toast(self, toast):
             shown.append(toast)
 
+    class ToastImagePosition:  # pylint: disable=too-few-public-methods
+        Inline = ""
+        AppLogo = "appLogoOverride"
+
+    module.ToastImagePosition = ToastImagePosition
     module.Toast = Toast
     module.ToastDisplayImage = ToastDisplayImage
     module.InteractableWindowsToaster = InteractableWindowsToaster
@@ -108,6 +113,7 @@ def test_windows_backend_contract(fake_windows_toasts, tmp_path):
     assert toast.tag == notify.TOAST_TAG      # a burst replaces the previous card (§10.8)
     assert toast.group == notify.TOAST_GROUP
     assert toast.images and toast.images[0][1] == str(icon)
+    assert toast.images[0][2] == {"position": "appLogoOverride", "circleCrop": True}   # small, left — not full-width
     toast.on_activated(None)
     assert clicks == [1]
 
