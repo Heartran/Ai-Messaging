@@ -650,6 +650,7 @@ Il caso è garantito ogni volta che l'username del sistema operativo differisce 
 **Regole:**
 
 - **Il bundle `.mcpb` non deve contenere un `.venv` precostruito.** Va creato sulla macchina di destinazione.
+- **Il bundle si costruisce con `python build_bundle.py`** (in `mcp/`, dopo `uv lock`), mai a mano. La suite del client confronta il bundle committato con i sorgenti: stessi file, versione del manifest uguale a `pyproject.toml`, lista `tools` del manifest uguale ai tool registrati dal server MCP. Un bundle vecchio è un test rosso, non una sorpresa su un'altra macchina.
 - `.venv/` in `.gitignore`, e verificare che non finisca nel pacchetto.
 - Vale a maggior ragione per un repo pubblico: chiunque installi da GitHub inciamperebbe nello stesso errore, per giunta trovandosi i path con l'username dell'autore.
 

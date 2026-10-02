@@ -335,14 +335,29 @@ the server. A client newer than the server fails loudly with an
 running server version — compare it with `server/pyproject.toml` when
 in doubt.
 
-**Packaging the `.mcpb` extension bundle: never include `.venv`.**
-Python virtualenvs are not relocatable — they hardcode absolute paths to
-the base interpreter of the machine (and username) they were built on,
-and die with cryptic errors anywhere else. The bundle ships only the
-sources, `pyproject.toml`, `uv.lock` and the manifest; `uv run` creates
-the environment on the target machine on first start. To recover an
-installation broken by a copied venv: delete its `.venv` and restart
-(uv rebuilds it locally).
+**What CI checks.** Both suites on Python 3.10 and 3.13, each against
+both MCP SDK generations (`mcp<2` and `mcp>=2`: the client supports
+both, so both are tested rather than whichever pip picks); a
+*lower-bounds* job that installs exactly the `>=` floors declared in
+each `pyproject.toml` and runs the suites against them, so a floor that
+is too low fails in CI and not on somebody's older machine; the memory
+layer demo as a smoke test; wheel packaging; and pylint at 10/10. Every
+job prints `pip freeze`, so a failure is diagnosable from the log alone.
+
+**Packaging the `.mcpb` extension bundle: `python build_bundle.py`.**
+Run it in `mcp/` after `uv lock`; it zips the sources, `pyproject.toml`,
+`uv.lock`, `manifest.json`, the icon, the license and the user_config
+example into `aim.mcpb`. The client suite checks the committed bundle
+against the sources — same files, manifest version equal to
+`pyproject.toml`, manifest `tools` equal to the tools the MCP server
+registers — so a bundle cannot drift behind the code unnoticed: bump the
+version, update the manifest, rebuild, commit all three together.
+**Never include `.venv`.** Python virtualenvs are not relocatable — they
+hardcode absolute paths to the base interpreter of the machine (and
+username) they were built on, and die with cryptic errors anywhere else.
+The bundle ships only sources and lock; `uv run` creates the environment
+on the target machine on first start. To recover an installation broken
+by a copied venv: delete its `.venv` and restart (uv rebuilds it locally).
 
 ## Project status
 
