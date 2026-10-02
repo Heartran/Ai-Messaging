@@ -38,6 +38,15 @@ def ui_url(origin: str, version: str = __version__) -> str:
     return f"{origin}{UI_PATH}?{DESKTOP_QUERY}={quote(version, safe='')}"
 
 
+def window_icon(platform: str | None = None) -> Path:
+    """The icon file for the window toolkit. pywebview documents `icon` as
+    GTK/Qt only, but its Windows backend hands the path to
+    System.Drawing.Icon — which accepts an .ico and throws on a .png, inside
+    the form constructor, with no window and no error to show for it."""
+    plat = sys.platform if platform is None else platform
+    return ASSETS / ("icon.ico" if plat == "win32" else "icon.png")
+
+
 def setup_html(current: str | None = None, error: str | None = None) -> str:
     """The first-run page: the server address, and nothing else to decide.
 
@@ -200,7 +209,7 @@ class DesktopApp:
         try:
             webview.start(
                 self.on_started, private_mode=False, storage_path=str(storage),
-                debug=self.debug, icon=str(ASSETS / "icon.png"),
+                debug=self.debug, icon=str(window_icon()),
             )
         except Exception as exc:  # pylint: disable=broad-exception-caught
             return self._fail_to_start(f"The window could not be created: {exc}")

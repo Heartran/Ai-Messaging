@@ -177,3 +177,9 @@ def test_startup_failure_text_names_the_usual_cause(tmp_path):
     assert str(tmp_path / "desktop.log") in text
     plain = startup_failure_text("something else", tmp_path / "desktop.log")
     assert "Unblock" not in plain and "something else" in plain
+
+
+def test_window_icon_is_a_real_ico_on_windows():
+    from aim_desktop.app import window_icon
+    assert window_icon("win32").suffix == ".ico" and window_icon("win32").exists()
+    assert window_icon("linux").suffix == ".png"
