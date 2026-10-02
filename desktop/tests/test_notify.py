@@ -101,7 +101,9 @@ def fake_windows_toasts(monkeypatch):
 def test_windows_backend_contract(fake_windows_toasts, tmp_path):
     icon = tmp_path / "icon.ico"
     icon.write_bytes(b"\0")
-    n = notify.WindowsToastNotifier(icon)
+    image = tmp_path / "icon.png"
+    image.write_bytes(b"\x89PNG")
+    n = notify.WindowsToastNotifier(icon, image)
     assert n.available is True
     assert n._toaster.aumid is None            # winreg unavailable → default identity, not a crash
 
@@ -112,7 +114,7 @@ def test_windows_backend_contract(fake_windows_toasts, tmp_path):
     assert len(toast.text_fields[1]) == MAX_BODY
     assert toast.tag == notify.TOAST_TAG      # a burst replaces the previous card (§10.8)
     assert toast.group == notify.TOAST_GROUP
-    assert toast.images and toast.images[0][1] == str(icon)
+    assert toast.images and toast.images[0][1] == str(image)     # the full-size png, never the .ico
     assert toast.images[0][2] == {"position": "appLogoOverride", "circleCrop": True}   # small, left — not full-width
     toast.on_activated(None)
     assert clicks == [1]
@@ -123,6 +125,14 @@ def test_windows_backend_contract(fake_windows_toasts, tmp_path):
 
 
 def test_windows_backend_without_icon(fake_windows_toasts, tmp_path):
-    n = notify.WindowsToastNotifier(tmp_path / "missing.ico")
+    n = notify.WindowsToastNotifier(tmp_path / "missing.ico", tmp_path / "missing.png")
     n.show("t", "b")
     assert fake_windows_toasts[0].images == []
+
+
+def test_windows_backend_falls_back_to_the_ico_without_a_png(fake_windows_toasts, tmp_path):
+    icon = tmp_path / "icon.ico"
+    icon.write_bytes(b"\0")
+    n = notify.WindowsToastNotifier(icon, tmp_path / "missing.png")
+    n.show("t", "b")
+    assert fake_windows_toasts[0].images[0][1] == str(icon)
