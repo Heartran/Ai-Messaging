@@ -871,6 +871,16 @@ if (settings.mode !== "participant" && settings.mode !== "observer") {
   settings.mode = state.me ? "participant" : "observer";
 }
 function saveSettings() { saveJSON("aim_ui_settings", settings); }
+if (DESKTOP_VERSION && !settings.desktopInit) {
+  // First time this profile runs under the desktop app — or a profile that
+  // saved settings before the server shipped the desktop hooks, with the
+  // browser-era "off" defaults stored. What the app is for starts on;
+  // whatever is chosen from here on is kept.
+  settings.notifyDesktop = true;
+  settings.notifyBackground = true;
+  settings.desktopInit = true;
+  saveSettings();
+}
 function isParticipant() { return settings.mode === "participant"; }
 function pollMs() { return Math.max(2, settings.pollSeconds || 5) * 1000; }
 // A hidden tab has nothing to draw: when it keeps polling at all (§10.8),
@@ -1851,6 +1861,16 @@ window.aimDesktopOpen = (chatId, messageId) => {
   goToNotif(n).catch((e) => toast(e.message, true));
 };
 
+/* The host calls this on its own clock while the window sits in the tray
+   (desktop/app.py): a hidden page's timers are throttled by the engine, a
+   call from outside is not. One chat-list read — exactly what the
+   background poller does — and the notifier runs after it. */
+window.aimDesktopTick = () => {
+  if (!document.hidden) return;   // visible: the regular pollers are on duty
+  loadHealth();
+  loadChats().catch(() => {});
+};
+
 /* The browser's permission API resolves a promise in modern engines and
    calls back in older Safari; accept either. */
 function askNotificationPermission() {
@@ -1967,7 +1987,8 @@ function renderNotifPanel() {
       ? "Mentions of you, introductions and new chats"
       : "Everything new in the chats " +
         (state.me && isParticipant() ? "you follow" : "on this tailnet")) +
-    (settings.notifyBackground ? ` · checked every ${bgPollMs() / 1000}s in background` : "") +
+    (DESKTOP_VERSION ? " · checked from the tray"
+      : settings.notifyBackground ? ` · checked every ${bgPollMs() / 1000}s in background` : "") +
     (settings.notifyDesktop
       ? (DESKTOP_VERSION ? " · Windows notifications on" : " · browser notifications on") : "") +
     " · kept in this browser";
@@ -2873,9 +2894,8 @@ function openSettings() {
       "is hidden or the window is not focused.";
   }
   const sound = makeCheck("Play a short sound", settings.notifySound);
-  const bg = makeCheck(DESKTOP_VERSION
-    ? `Keep checking while the window is hidden or in the tray — one chat-list read every ${BG_POLL_SECONDS}s`
-    : `Keep checking while the tab is in background — one chat-list read every ${BG_POLL_SECONDS}s`,
+  const bg = makeCheck(
+    `Keep checking while the tab is in background — one chat-list read every ${BG_POLL_SECONDS}s`,
     settings.notifyBackground);
   const bgNote = document.createElement("div");
   bgNote.className = "dialog-note";
@@ -2884,6 +2904,13 @@ function openSettings() {
     "waits for you to come back. On, a hidden tab still learns what " +
     "arrives, so the title, the sound and the browser notification can " +
     "tell you.";
+  if (DESKTOP_VERSION) {
+    // The host keeps the page checking from the tray on its own clock:
+    // nothing to decide here.
+    bg.wrap.hidden = true;
+    bgNote.textContent = "While the window is hidden or in the tray, the desktop app " +
+      "keeps checking the chat list on its own clock.";
+  }
   box.append(desktop.wrap, desktopNote, sound.wrap, bg.wrap, bgNote);
 
   // identity key — the thing that makes one person one participant (§11.4)
@@ -2951,7 +2978,7 @@ function openSettings() {
     settings.pollSeconds = Math.max(2, parseInt(pollInput.value, 10) || 5);
     settings.showDormant = checkInput.checked;
     settings.notifyLevel = level;
-    settings.notifyBackground = bg.input.checked;
+    settings.notifyBackground = DESKTOP_VERSION ? true : bg.input.checked;
     const soundTurnedOn = sound.input.checked && !settings.notifySound;
     settings.notifySound = sound.input.checked;
     if (soundTurnedOn) { primeAudio(); setTimeout(chime, 150); } // hear it now, on a gesture

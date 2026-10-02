@@ -15,6 +15,7 @@ import html
 import logging
 import os
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -29,6 +30,12 @@ from .unblock import bundle_root, unblock_tree
 log = logging.getLogger("aim_desktop.app")
 
 UI_PATH = "/ui"
+# While the window is hidden the host drives the page's chat-list read on
+# its own clock: the engine throttles a hidden page's timers, a script run
+# from outside is not throttled. Same relaxed pace as the page's own
+# background poller (§10.8), never faster.
+TRAY_POLL_SECONDS = 30
+TICK_SCRIPT = "window.aimDesktopTick && window.aimDesktopTick();"
 DESKTOP_QUERY = "desktop"   # the page reads this: it is the "you are hosted" signal
 WINDOW_TITLE = "AI Messaging"
 
@@ -109,6 +116,8 @@ class DesktopApp:
         self.tray = Tray(self.show_window, self.ask_server, self.quit)
         self.window: Any = None
         self._quitting = False
+        self._hidden = self.start_hidden
+        self._stop = threading.Event()
 
     # ---------------------------------------------------------------- Host
     def show_window(self) -> None:
@@ -118,6 +127,7 @@ class DesktopApp:
         try:
             window.show()
             window.restore()
+            self._hidden = False
         except Exception:  # pylint: disable=broad-exception-caught
             log.exception("could not bring the window to front")
 
@@ -154,6 +164,7 @@ class DesktopApp:
 
     def quit(self) -> None:
         self._quitting = True
+        self._stop.set()
         self.tray.stop()
         if self.window is not None:
             self.window.destroy()
@@ -165,7 +176,20 @@ class DesktopApp:
         if self._quitting or not self.config.close_to_tray or self.window is None:
             return None
         self.window.hide()
+        self._hidden = True
         return False
+
+    def tick(self) -> bool:
+        """One beat of the tray clock: poke the page if the window is hidden.
+        Returns whether it did."""
+        if not self._hidden or self.window is None:
+            return False
+        self.run_js(TICK_SCRIPT)
+        return True
+
+    def _tick_loop(self) -> None:
+        while not self._stop.wait(TRAY_POLL_SECONDS):
+            self.tick()
 
     def on_started(self) -> None:
         """Runs once the GUI loop is up, in pywebview's worker thread."""
@@ -174,6 +198,7 @@ class DesktopApp:
         except Exception:  # pylint: disable=broad-exception-caught
             log.exception("tray icon unavailable; closing the window will quit")
             self.config.close_to_tray = False
+        threading.Thread(target=self._tick_loop, name="aim-tray-clock", daemon=True).start()
 
     # ----------------------------------------------------------------- run
     def initial_page(self) -> tuple[str | None, str | None]:
@@ -214,6 +239,7 @@ class DesktopApp:
         except Exception as exc:  # pylint: disable=broad-exception-caught
             return self._fail_to_start(f"The window could not be created: {exc}")
         finally:
+            self._stop.set()
             self.tray.stop()
         return 0
 
