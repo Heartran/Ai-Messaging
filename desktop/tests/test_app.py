@@ -183,3 +183,28 @@ def test_window_icon_is_a_real_ico_on_windows():
     from aim_desktop.app import window_icon
     assert window_icon("win32").suffix == ".ico" and window_icon("win32").exists()
     assert window_icon("linux").suffix == ".png"
+
+
+def test_tray_clock_pokes_the_page_only_while_hidden(tmp_path):
+    from aim_desktop.app import TICK_SCRIPT
+    app = make(tmp_path)
+    assert app.tick() is False                      # visible: the page polls itself
+    assert app.on_closing() is False                # X → hidden in the tray
+    assert app.tick() is True
+    assert app.window.log[-1] == ("js", TICK_SCRIPT)
+    app.show_window()                               # back in front
+    assert app.tick() is False
+    app.window = None
+    app.on_closing()
+    assert app.tick() is False
+
+
+def test_starting_hidden_means_the_clock_runs_from_the_start(tmp_path):
+    app = make(tmp_path, start_hidden=True)
+    assert app.tick() is True
+
+
+def test_quit_stops_the_clock(tmp_path):
+    app = make(tmp_path)
+    app.quit()
+    assert app._stop.is_set()
