@@ -74,10 +74,11 @@ class WindowsToastNotifier:
 
     def __init__(self, icon_path: Path | None = None) -> None:
         # pylint: disable=import-error  # Windows-only dependency
-        from windows_toasts import InteractableWindowsToaster, Toast, ToastDisplayImage
+        from windows_toasts import InteractableWindowsToaster, Toast, ToastDisplayImage, ToastImagePosition
 
         self._toast_cls = Toast
         self._image_cls = ToastDisplayImage
+        self._logo_position = ToastImagePosition.AppLogo
         self._icon = icon_path if icon_path and icon_path.exists() else None
         aumid = self._register_aumid()
         self._toaster = InteractableWindowsToaster(APP_NAME, notifierAUMID=aumid)
@@ -106,7 +107,10 @@ class WindowsToastNotifier:
         toast.tag = TOAST_TAG
         if self._icon is not None:
             try:
-                toast.AddImage(self._image_cls.fromPath(self._icon, circleCrop=True))
+                # The small round logo on the left, like a chat avatar. The default
+                # (inline) placement renders the image full-width under the text.
+                toast.AddImage(self._image_cls.fromPath(
+                    self._icon, position=self._logo_position, circleCrop=True))
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 log.debug("toast without icon: %s", exc)
         if on_click is not None:
