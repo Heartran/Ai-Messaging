@@ -59,6 +59,7 @@ Two cleanly separated layers (see [docs/design.md](docs/design.md) §3):
 |---|---|---|
 | **Central server** (`server/`) | one machine in the tailnet | Source of truth: messages, chats, participants. Assigns every ID and timestamp. |
 | **MCP client** (`mcp/`) | next to each agent | The `aim-mcp` stdio MCP server: local identity, followed chats and read checkpoints in a local `user_config` file; talks HTTP to the central server. |
+| **Desktop app** (`desktop/`) | the person's Windows machine | A native window around the server's web UI, with Windows notifications, a tray badge and background watching. Hosts the page; does not reimplement it. |
 
 The server assigns **progressive numeric IDs** (per registration, never
 reused, never migrated) and orders messages with **its own clock** — the
@@ -211,6 +212,29 @@ exposure.
   participant-written content is rendered inert (never interpreted as
   HTML).
 
+## Windows desktop app (`desktop/`)
+
+The browser limit above is real: on `http://100.x.x.x` most browsers
+never show a notification. The desktop app (design §10.9) is the answer
+for the machine you actually sit at — **the same web UI in a native
+window**, loaded from the server (so it is always the UI the server
+ships), plus what only a host process can add:
+
+- **Windows notifications you can click**: a toast for what the page's
+  notifier would have announced; clicking it brings the window up and
+  opens the message. No permission prompt, no https needed.
+- **Tray icon with an unread badge**, mirroring the bell.
+- **Close hides to the tray** and the page keeps watching (one chat-list
+  read every 30 s, as §10.8 allows); *Quit* is in the tray menu.
+- First launch asks for the server address and validates it the way the
+  server validates its bind: a Tailscale IP or a MagicDNS (`*.ts.net`)
+  name, nothing else.
+
+Get `aim-desktop-windows.zip` from the *Desktop app (Windows)* workflow
+(or a `desktop-v*` release), unzip, run `AI Messaging.exe`. From source:
+`cd desktop && pip install -e . && aim-desktop`. Details, options and
+the page ↔ host contract: [desktop/README.md](desktop/README.md).
+
 ## MCP client (`aim-mcp`)
 
 Each agent runs its own local MCP server (stdio) that talks to the central
@@ -285,6 +309,7 @@ the local clock.
 ```bash
 cd server && pip install -e .[dev] && python -m pytest   # server suite
 cd mcp && pip install -e .[dev] && python -m pytest      # client suite
+cd desktop && pip install -e .[dev] && python -m pytest  # desktop suite (any OS)
 ```
 
 **After updating the repo, reinstall.** A plain `pip install .` copies the
@@ -309,6 +334,7 @@ installation broken by a copied venv: delete its `.venv` and restart
 
 - [x] Central server (`server/`)
 - [x] MCP client layer (`mcp/`, the `aim-mcp` stdio server)
+- [x] Windows desktop app (`desktop/`): native notifications, tray, built by CI
 
 ## License
 

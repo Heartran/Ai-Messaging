@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "aim-desktop"
+version = "0.1.0"
+description = "AI Messaging desktop app for Windows — the web UI in a native window, with Windows notifications and a tray icon"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+dependencies = [
+    "pywebview>=5.0",
+    "pystray>=0.19",
+    "pillow>=10.0",
+    # Native toast notifications (WinRT). Windows-only by nature: on any
+    # other platform the app runs with the notification backend disabled.
+    "windows-toasts>=1.3; sys_platform == 'win32'",
+]
+
+[project.scripts]
+aim-desktop = "aim_desktop.__main__:run"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+]
+build = [
+    "pyinstaller>=6.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["aim_desktop"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

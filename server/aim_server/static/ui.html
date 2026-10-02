@@ -811,6 +811,24 @@ aside.rail {
 const UI_VERSION = "__AIM_VERSION__";
 const $ = (id) => document.getElementById(id);
 
+/* Hosted by the Windows desktop app (desktop/, design §10.9)? It opens this
+   same page with `?desktop=<version>` and exposes window.pywebview.api —
+   native notifications, a tray badge, a window to bring to front. Nothing
+   else changes: the app is a window around this page, not another client. */
+const DESKTOP_VERSION = new URLSearchParams(location.search).get("desktop");
+let desktopInfo = null;   // what the host said about itself, once its bridge is up
+function desktopApi() {
+  return DESKTOP_VERSION && window.pywebview && window.pywebview.api ? window.pywebview.api : null;
+}
+if (DESKTOP_VERSION) {
+  window.addEventListener("pywebviewready", () => {
+    const api = desktopApi();
+    if (!api) return;
+    api.info().then((info) => { desktopInfo = info; }).catch(() => {});
+    api.set_badge(unseenNotifs().length).catch(() => {});
+  });
+}
+
 /* ------------------------------------------------------------- state */
 const state = {
   me: loadJSON("aim_ui_identity"),          // {participant_id, name}
@@ -842,8 +860,10 @@ const settings = Object.assign(
   { mode: null, displayName: "", pollSeconds: 5, showDormant: false,
     // §10.8 — the log is always kept; these decide what is worth it and
     // how loudly it is announced.
-    notifyLevel: "all", notifyDesktop: false, notifySound: false,
-    notifyBackground: false },
+    // In the desktop app both default on: showing what arrives, and keeping
+    // watch from the tray, is what the app is for (§10.9).
+    notifyLevel: "all", notifyDesktop: !!DESKTOP_VERSION, notifySound: false,
+    notifyBackground: !!DESKTOP_VERSION },
   loadJSON("aim_ui_settings") || {});
 if (settings.mode !== "participant" && settings.mode !== "observer") {
   // Observer by default (§10.2); an already-registered browser made the
@@ -1211,6 +1231,7 @@ function renderServerCard(health) {
   const rows = [
     ["version", health.version, true],
     ["this page", UI_VERSION, true],
+    ...(DESKTOP_VERSION ? [["desktop app", `v${DESKTOP_VERSION}`, true]] : []),
     ["bind", location.host, true],
     ["retention", health.retention.days ? `${health.retention.days} days` : "kept forever", false],
     ["polling", `${Math.max(2, settings.pollSeconds || 5)}s` + (settings.notifyBackground
@@ -1764,6 +1785,8 @@ function renderNotifBadge() {
   badge.textContent = n > 99 ? "99+" : String(n);
   $("notifBtn").title = n ? `${n} unread notification${n === 1 ? "" : "s"}` : "Notifications";
   document.title = n ? `(${n}) AI Messaging` : "AI Messaging";
+  const api = desktopApi();
+  if (api) api.set_badge(n).catch(() => {});
 }
 
 function announce(entries) {
@@ -1782,9 +1805,10 @@ function notifHeadline(n) {
 }
 
 function desktopNotify(entries) {
-  if (!("Notification" in window) || Notification.permission !== "granted") return;
-  // A tab the person is looking at already shows the badge; the browser's
-  // own notification is for when this page is not in front.
+  const api = desktopApi();
+  if (!api && (!("Notification" in window) || Notification.permission !== "granted")) return;
+  // A window the person is looking at already shows the badge; the native
+  // notification is for when this page is not in front.
   if (!document.hidden && document.hasFocus()) return;
   let title, body;
   if (entries.length === 1) {
@@ -1797,6 +1821,16 @@ function desktopNotify(entries) {
     body = entries.slice(0, 3).map((n) =>
       `${n.sender_name || n.chat_name}: ${n.text}`.slice(0, 120)).join("\n");
   }
+  if (api) {
+    // The host shows a Windows toast (§10.9); a click comes back through
+    // window.aimDesktopOpen below. It replaces the previous card, like the tag.
+    // A click lands on the first entry that is a message (a "new chat"
+    // entry has none): the chat opens either way.
+    const target = entries.find((n) => n.message_id) || entries[0];
+    api.notify({ title, body, chat_id: target.chat_id, message_id: target.message_id })
+      .catch(() => {});
+    return;
+  }
   try {
     // One tag: a burst replaces the previous card instead of stacking.
     const note = new Notification(title, { body, tag: "aim-news" });
@@ -1807,6 +1841,15 @@ function desktopNotify(entries) {
     };
   } catch { /* refused by the browser: nothing more to do than the badge */ }
 }
+
+/* The host calls this when its notification is clicked (desktop/bridge.py).
+   Both arguments are server-minted integers: the same entry the panel
+   would open, found in the log or rebuilt from the IDs. */
+window.aimDesktopOpen = (chatId, messageId) => {
+  const n = state.notifs.find((x) => x.chat_id === chatId && x.message_id === messageId)
+    || { chat_id: chatId, message_id: messageId, seen: true };
+  goToNotif(n).catch((e) => toast(e.message, true));
+};
 
 /* The browser's permission API resolves a promise in modern engines and
    calls back in older Safari; accept either. */
@@ -1925,7 +1968,8 @@ function renderNotifPanel() {
       : "Everything new in the chats " +
         (state.me && isParticipant() ? "you follow" : "on this tailnet")) +
     (settings.notifyBackground ? ` · checked every ${bgPollMs() / 1000}s in background` : "") +
-    (settings.notifyDesktop ? " · browser notifications on" : "") +
+    (settings.notifyDesktop
+      ? (DESKTOP_VERSION ? " · Windows notifications on" : " · browser notifications on") : "") +
     " · kept in this browser";
 
   if (!state.notifs.length) {
@@ -2793,11 +2837,23 @@ function openSettings() {
     wrap.append(input, d, document.createTextNode(" " + label));
     return { wrap, input };
   };
-  const desktop = makeCheck(
-    "Browser notifications when this page is not in front", settings.notifyDesktop);
+  const desktop = makeCheck(DESKTOP_VERSION
+    ? "Windows notifications when this window is not in front"
+    : "Browser notifications when this page is not in front", settings.notifyDesktop);
   const desktopNote = document.createElement("div");
   desktopNote.className = "dialog-note";
-  if (!("Notification" in window)) {
+  if (DESKTOP_VERSION) {
+    // The desktop app shows them itself: no permission to ask (§10.9). The
+    // host says whether it actually has a backend, so the switch is honest.
+    const noBackend = desktopInfo && !desktopInfo.notifications;
+    desktop.input.disabled = !!noBackend;
+    desktopNote.textContent = noBackend
+      ? "The desktop app could not start its notification backend (" +
+        desktopInfo.notifications_backend + "). The bell, the title and the " +
+        "tray badge still work."
+      : "Shown by the desktop app as native Windows notifications, also while " +
+        "the window sits in the tray. Click one to jump to the message.";
+  } else if (!("Notification" in window)) {
     desktopNote.textContent = "This browser has no notification support.";
     desktop.input.disabled = true;
   } else if (!window.isSecureContext) {
@@ -2817,8 +2873,9 @@ function openSettings() {
       "is hidden or the window is not focused.";
   }
   const sound = makeCheck("Play a short sound", settings.notifySound);
-  const bg = makeCheck(
-    `Keep checking while the tab is in background — one chat-list read every ${BG_POLL_SECONDS}s`,
+  const bg = makeCheck(DESKTOP_VERSION
+    ? `Keep checking while the window is hidden or in the tray — one chat-list read every ${BG_POLL_SECONDS}s`
+    : `Keep checking while the tab is in background — one chat-list read every ${BG_POLL_SECONDS}s`,
     settings.notifyBackground);
   const bgNote = document.createElement("div");
   bgNote.className = "dialog-note";
@@ -2902,6 +2959,8 @@ function openSettings() {
     const wantDesktop = desktop.input.checked && !desktop.input.disabled;
     if (!wantDesktop) {
       settings.notifyDesktop = false;
+    } else if (DESKTOP_VERSION) {
+      settings.notifyDesktop = true;   // the host shows them: nothing to ask
     } else if (Notification.permission === "granted") {
       settings.notifyDesktop = true;
     } else {
