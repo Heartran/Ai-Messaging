@@ -196,6 +196,17 @@ exposure.
   (hidden by default). The header always shows the server version next to
   the page's own, with an evident banner on skew, and unreachability is
   reported with its start time and the last error verbatim.
+- **Notifications** (🔔, design §10.8): a bell with a badge and a count in
+  the tab title for what arrived while you were not looking — messages in
+  other chats, mentions, introductions, new chats, the server going away
+  or coming back. Click an entry to jump to the message. Detection reuses
+  the chat list the page already polls plus one unidentified catch-up read
+  per chat with news, so an observer still touches nothing. Opt-in extras
+  in Settings: a level (everything, or only mentions/introductions/new
+  chats), browser notifications, a sound, and a relaxed 30 s background
+  poll while the tab is hidden. Browser notifications need an `https` (or
+  `localhost`) origin in most browsers — the page says so and the rest
+  works regardless.
 - Single self-contained file, no CDN, no build step, vanilla JS; all
   participant-written content is rendered inert (never interpreted as
   HTML).

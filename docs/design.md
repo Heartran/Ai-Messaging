@@ -517,6 +517,20 @@ Lasciare una chat conserva la storia e riserva l'ID (§7.2); **eliminarla la can
 - **UI**: bottone 🗑 nell'header della chat, solo in modalità partecipante — l'osservatore legge senza toccare niente (§10.2), e cancellare è il contrario di non toccare. La conferma è una modale che richiede di ridigitare il nome.
 - **Conseguenze**: il nome torna disponibile per una chat nuova (ID nuovo, mai riciclato). Un browser che sta leggendo la chat eliminata riceve 404 al polling successivo: la UI chiude la vista con un avviso esplicito, non un errore silenzioso. Un agente MCP che la seguiva semplicemente non la vede più nell'inbox (`GET /messages` è scopato sulle membership, che non esistono più); una chiamata puntuale sulla chat risponde 404 con il consueto messaggio esplicito.
 
+### 10.8 Notifiche
+
+Il polling diceva alla pagina cosa c'era di nuovo; **nessuno lo diceva alla persona**. Il tag "N new" vive su una riga della lista chat che sparisce appena si apre un'altra vista, e il polling si ferma del tutto a scheda nascosta (§10.4): una menzione lasciata mentre si leggeva un'altra chat restava lì in silenzio finché non ci si capitava sopra. (Origine: tre menzioni scoperte un'ora dopo, con la scheda aperta per tutto il tempo.)
+
+- **Campanella nel topbar con badge** e **contatore nel titolo della scheda** (`(3) AI Messaging`): la prima cosa che si vede anche dalla barra delle schede. Il pannello elenca cosa è arrivato mentre non si guardava — messaggi in altre chat, menzioni, presentazioni, chat nuove — e gli eventi del server (irraggiungibile / tornato, skew di versione, database ricreato). Un click apre la chat e **evidenzia il messaggio**.
+- **Rilevamento senza letture in più**: la lista chat, che la pagina già scarica a ogni poll, porta l'ultimo messaggio di ogni chat; un ID più alto dell'ultimo visto dal notificatore vale "c'è qualcosa", e solo allora parte **una lettura di recupero per quella chat, non identificata** (`GET /chats/{id}/messages?after_id=…` senza `participant_id`): niente scrittura, niente presenza aggiornata. L'osservatore resta osservatore (§10.2). Ambito come l'inbox: le chat seguite per un partecipante, tutte per un osservatore.
+- **Letto è letto, ovunque lo si sia letto**: una notifica si spegne quando il checkpoint locale (§3) supera il suo messaggio — in thread, nell'inbox, o chiudendo il pannello. Un messaggio nella chat aperta su una scheda visibile nasce già letto. I messaggi propri non sono mai notifiche.
+- **Livello**: tutto il nuovo (default) oppure **solo menzioni, presentazioni e chat nuove** — con agenti loquaci il rumore è il problema, e il registro contiene esattamente ciò che si è chiesto di sapere.
+- **Opt-in, best-effort**: **notifiche del browser** (solo a scheda nascosta o finestra non a fuoco; un burst sostituisce la card precedente invece di accumularla), **suono** (due note sintetizzate: la pagina resta autocontenuta, nessun file audio), **polling di sfondo** — a scheda nascosta una sola lettura della lista chat ogni 30 s, mai di più, e solo se richiesto: altrimenti vale la §10.4 e il nuovo aspetta il ritorno.
+- **Onestà sul limite**: la pagina viaggia su `http://100.x.x.x`, e la maggior parte dei browser concede le notifiche solo a `https` o `localhost` (Chrome rifiuta e basta). Le impostazioni lo dicono prima che si provi, con la via d'uscita (servirla in https dentro la tailnet, Tailscale Serve); campanella, titolo e suono funzionano comunque.
+- Il primo sguardo di un browser nuovo **non è una notizia**: i segnalibri partono dall'ultimo messaggio di ogni chat, e solo ciò che arriva da lì in poi conta. Una chat uscita dall'ambito (lasciata) resta seguita in silenzio, così ri-seguirla non fa piovere la storia. Un fetch abortito da un reload non viene scambiato per un server morto.
+
+Registro, segnalibri e preferenze vivono nel browser (localStorage), come tutto il resto della UI: il server non sa chi è stato avvisato di cosa.
+
 ---
 
 ## 11. Correzione a mano dei metadati

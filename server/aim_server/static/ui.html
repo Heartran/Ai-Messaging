@@ -135,6 +135,8 @@ textarea.input { resize: none; }
   width: min(440px, 100%); display: flex; flex-direction: column; gap: var(--space-3);
   padding: var(--space-4); border-radius: var(--radius-lg);
   background: var(--color-surface); box-shadow: var(--shadow-lg);
+  /* Settings outgrew a phone screen: the dialog scrolls, the actions stay reachable. */
+  max-height: calc(100vh - 2 * var(--space-4)); overflow-y: auto;
 }
 .dialog-title { font-family: var(--font-heading); font-weight: 500; font-size: 20px; letter-spacing: -0.015em; }
 .dialog-body { font-size: 14px; opacity: 0.85; }
@@ -507,6 +509,71 @@ aside.rail {
 .placeholder .h { font-family: var(--font-heading); font-weight: 500; font-size: 26px; letter-spacing: -0.015em; }
 .placeholder .t { font-size: 14px; color: var(--color-neutral-400); max-width: 40ch; }
 
+/* — notifications (§10.8) — */
+#notifBtn { position: relative; }
+#notifBadge {
+  position: absolute; top: -6px; right: -6px; min-width: 18px; height: 18px;
+  padding: 0 5px; border-radius: 9px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-size: 10.5px; font-weight: 600; line-height: 1;
+  background: var(--color-accent); color: var(--color-bg);
+  box-shadow: 0 0 0 2px var(--color-surface);
+}
+#notifPanel {
+  position: fixed; top: 58px; right: var(--space-6); z-index: 45;
+  width: min(420px, calc(100vw - 2 * var(--space-4)));
+  max-height: min(72vh, 680px); display: flex; flex-direction: column;
+  border-radius: var(--radius-lg); background: var(--color-surface);
+  box-shadow: var(--shadow-lg); overflow: hidden;
+}
+.np-head {
+  display: flex; align-items: center; gap: var(--space-2); flex: none;
+  padding: var(--space-4) var(--space-4) var(--space-3);
+}
+.np-title { font-family: var(--font-heading); font-weight: 500; font-size: 16px; letter-spacing: -0.01em; flex: none; }
+.np-sub {
+  flex: 1; min-width: 0; font-size: 11px; color: var(--color-neutral-500);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.np-head .btn { font-size: 12px; flex: none; }
+.np-list { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: var(--space-2); }
+.np-item {
+  display: flex; gap: var(--space-3); width: 100%; text-align: left;
+  padding: var(--space-3) var(--space-4); border: none; background: transparent;
+  border-left: 2px solid transparent; font: inherit; color: var(--color-text); cursor: pointer;
+}
+.np-item:hover { background: color-mix(in srgb, var(--color-text) 6%, transparent); }
+.np-item.unseen { border-left-color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 7%, transparent); }
+.np-item.unseen:hover { background: color-mix(in srgb, var(--color-accent) 12%, transparent); }
+.np-item.sys { cursor: default; }
+.np-body { flex: 1; min-width: 0; }
+.np-t1 { display: flex; align-items: baseline; gap: var(--space-2); font-size: 13.5px; }
+.np-t1 .who { font-weight: 500; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.np-t1 .time { margin-left: auto; flex: none; font-size: 11px; color: var(--color-neutral-600); }
+.np-t2 {
+  font-size: 12.5px; color: var(--color-neutral-400); margin-top: 2px; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.np-meta { display: flex; align-items: center; gap: var(--space-2); margin-top: 4px; flex-wrap: wrap; }
+.np-foot {
+  display: flex; align-items: center; gap: var(--space-2); flex: none;
+  padding: var(--space-3) var(--space-4); font-size: 11px; color: var(--color-neutral-600);
+  background: linear-gradient(to right, var(--color-divider), transparent 88%) no-repeat top / 100% 1px;
+}
+.np-foot .t { flex: 1; min-width: 0; }
+.np-foot .btn { font-size: 11px; padding-block: 2px; }
+.ava.sys { background: var(--color-neutral-900); color: var(--color-neutral-400); }
+.ava.sys svg { display: block; }
+.mrow.flash { animation: flash 1.8s ease-out; border-radius: var(--radius-md); }
+@keyframes flash {
+  0% { background: color-mix(in srgb, var(--color-accent) 24%, transparent); }
+  100% { background: transparent; }
+}
+.settings-h {
+  font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--color-accent); margin-top: var(--space-3);
+}
+
 /* toasts */
 #toasts { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 50; display: flex; flex-direction: column; gap: var(--space-2); align-items: center; }
 .toast {
@@ -537,6 +604,12 @@ aside.rail {
   #backBtn { display: inline-flex; }
   .col-head, .stream, #threadHead, #composer { padding-left: var(--space-4); padding-right: var(--space-4); }
   .searchbox { width: 160px; }
+  /* The top bar wraps on a phone, so the panel anchors to the bottom edge
+     instead of to the bell: a sheet, not a popover. */
+  #notifPanel {
+    top: auto; bottom: 0; left: 0; right: 0; width: 100%;
+    max-height: 80vh; border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
 }
 </style>
 </head>
@@ -562,6 +635,10 @@ aside.rail {
     </div>
     <button class="btn btn-secondary btn-icon" id="adminBtn" title="Edit stored data" hidden>
       <svg width="18" height="18" viewBox="0 0 256 256" fill="currentColor"><path d="M227.31,73.37,182.63,28.68a16,16,0,0,0-22.63,0L36.69,152A15.86,15.86,0,0,0,32,163.31V208a16,16,0,0,0,16,16H92.69A15.86,15.86,0,0,0,104,219.31L227.31,96a16,16,0,0,0,0-22.63ZM92.69,208H48V163.31l88-88L180.69,120ZM192,108.68,147.31,64l24-24L216,84.68Z"/></svg>
+    </button>
+    <button class="btn btn-secondary btn-icon" id="notifBtn" title="Notifications" aria-haspopup="true" aria-expanded="false">
+      <svg width="18" height="18" viewBox="0 0 256 256" fill="currentColor"><path d="M221.8,175.94C216.25,166.38,208,139.33,208,104a80,80,0,1,0-160,0c0,35.34-8.26,62.38-13.81,71.94A16,16,0,0,0,48,200H88.81a40,40,0,0,0,78.38,0H208a16,16,0,0,0,13.8-24.06ZM128,216a24,24,0,0,1-22.62-16h45.24A24,24,0,0,1,128,216ZM48,184c7.7-13.24,16-43.92,16-80a64,64,0,1,1,128,0c0,36.05,8.28,66.73,16,80Z"/></svg>
+      <span id="notifBadge" hidden></span>
     </button>
     <button class="btn btn-secondary btn-icon" id="settingsBtn" title="Settings">
       <svg width="18" height="18" viewBox="0 0 256 256" fill="currentColor"><path d="M128,80a48,48,0,1,0,48,48A48.05,48.05,0,0,0,128,80Zm0,80a32,32,0,1,1,32-32A32,32,0,0,1,128,160Zm88-29.84q.06-2.16,0-4.32l14.92-18.64a8,8,0,0,0,1.48-7.06,107.21,107.21,0,0,0-10.88-26.25,8,8,0,0,0-6-3.93l-23.72-2.64q-1.48-1.56-3-3L186,40.54a8,8,0,0,0-3.94-6,107.71,107.71,0,0,0-26.25-10.87,8,8,0,0,0-7.06,1.49L130.16,40Q128,40,125.84,40L107.2,25.11a8,8,0,0,0-7.06-1.48A107.6,107.6,0,0,0,73.89,34.51a8,8,0,0,0-3.93,6L67.32,64.27q-1.56,1.49-3,3L40.54,70a8,8,0,0,0-6,3.94,107.71,107.71,0,0,0-10.87,26.25,8,8,0,0,0,1.49,7.06L40,125.84Q40,128,40,130.16L25.11,148.8a8,8,0,0,0-1.48,7.06,107.21,107.21,0,0,0,10.88,26.25,8,8,0,0,0,6,3.93l23.72,2.64q1.49,1.56,3,3L70,215.46a8,8,0,0,0,3.94,6,107.71,107.71,0,0,0,26.25,10.87,8,8,0,0,0,7.06-1.49L125.84,216q2.16.06,4.32,0l18.64,14.92a8,8,0,0,0,7.06,1.48,107.21,107.21,0,0,0,26.25-10.88,8,8,0,0,0,3.93-6l2.64-23.72q1.56-1.48,3-3L215.46,186a8,8,0,0,0,6-3.94,107.71,107.71,0,0,0,10.87-26.25,8,8,0,0,0-1.49-7.06Zm-16.1-6.5a73.93,73.93,0,0,1,0,8.68,8,8,0,0,0,1.74,5.48l14.19,17.73a91.57,91.57,0,0,1-6.23,15L187,173.11a8,8,0,0,0-5.1,2.64,74.11,74.11,0,0,1-6.14,6.14,8,8,0,0,0-2.64,5.1l-2.51,22.58a91.32,91.32,0,0,1-15,6.23l-17.74-14.19a8,8,0,0,0-5-1.75h-.48a73.93,73.93,0,0,1-8.68,0,8,8,0,0,0-5.48,1.74L100.45,215.8a91.57,91.57,0,0,1-15-6.23L82.89,187a8,8,0,0,0-2.64-5.1,74.11,74.11,0,0,1-6.14-6.14,8,8,0,0,0-5.1-2.64L46.43,170.6a91.32,91.32,0,0,1-6.23-15l14.19-17.74a8,8,0,0,0,1.74-5.48,73.93,73.93,0,0,1,0-8.68,8,8,0,0,0-1.74-5.48L40.2,100.45a91.57,91.57,0,0,1,6.23-15L69,82.89a8,8,0,0,0,5.1-2.64,74.11,74.11,0,0,1,6.14-6.14A8,8,0,0,0,82.89,69L85.4,46.43a91.32,91.32,0,0,1,15-6.23l17.74,14.19a8,8,0,0,0,5.48,1.74,73.93,73.93,0,0,1,8.68,0,8,8,0,0,0,5.48-1.74L155.55,40.2a91.57,91.57,0,0,1,15,6.23L173.11,69a8,8,0,0,0,2.64,5.1,74.11,74.11,0,0,1,6.14,6.14,8,8,0,0,0,5.1,2.64l22.58,2.51a91.32,91.32,0,0,1,6.23,15l-14.19,17.74A8,8,0,0,0,199.87,123.66Z"/></svg>
@@ -712,6 +789,21 @@ aside.rail {
 </div>
 
 <div class="dialog-backdrop" id="overlay" hidden></div>
+
+<div id="notifPanel" role="dialog" aria-label="Notifications" hidden>
+  <div class="np-head">
+    <span class="np-title">Notifications</span>
+    <span class="np-sub" id="notifSub"></span>
+    <button class="btn btn-ghost" id="notifReadAll">Mark all read</button>
+    <button class="btn btn-ghost" id="notifClear" style="color:var(--color-neutral-500);">Clear</button>
+  </div>
+  <div class="np-list" id="notifList"></div>
+  <div class="np-foot">
+    <span class="t" id="notifFoot"></span>
+    <button class="btn btn-ghost" id="notifSettings">Settings</button>
+  </div>
+</div>
+
 <div id="toasts"></div>
 
 <script>
@@ -734,7 +826,10 @@ const state = {
   members: [],
   maxMsgId: 0,
   mentions: new Set(),
-  pollChats: null, pollView: null,
+  pollChats: null, pollView: null, pollBg: null,
+  notifs: loadJSON("aim_ui_notifs") || [],   // notification log, newest first (§10.8)
+  notified: loadJSON("aim_ui_notified"),      // chatId -> last message id the notifier saw; null = never ran
+  notifOpen: false,
 };
 
 function loadJSON(key) {
@@ -744,7 +839,11 @@ function saveJSON(key, value) { localStorage.setItem(key, JSON.stringify(value))
 
 /* Settings (§10): all in the browser — the UI keeps no state on the server. */
 const settings = Object.assign(
-  { mode: null, displayName: "", pollSeconds: 5, showDormant: false },
+  { mode: null, displayName: "", pollSeconds: 5, showDormant: false,
+    // §10.8 — the log is always kept; these decide what is worth it and
+    // how loudly it is announced.
+    notifyLevel: "all", notifyDesktop: false, notifySound: false,
+    notifyBackground: false },
   loadJSON("aim_ui_settings") || {});
 if (settings.mode !== "participant" && settings.mode !== "observer") {
   // Observer by default (§10.2); an already-registered browser made the
@@ -754,6 +853,10 @@ if (settings.mode !== "participant" && settings.mode !== "observer") {
 function saveSettings() { saveJSON("aim_ui_settings", settings); }
 function isParticipant() { return settings.mode === "participant"; }
 function pollMs() { return Math.max(2, settings.pollSeconds || 5) * 1000; }
+// A hidden tab has nothing to draw: when it keeps polling at all (§10.8),
+// it does so at a relaxed pace, never faster than every 30s.
+const BG_POLL_SECONDS = 30;
+function bgPollMs() { return Math.max(BG_POLL_SECONDS, settings.pollSeconds || 5) * 1000; }
 
 /* This browser's identity key, minted once if absent. It is deliberately
    readable and replaceable: for a human, the key IS the person, and the
@@ -825,10 +928,17 @@ function checkInstance(instance) {
   localStorage.setItem("aim_ui_instance", instance);
   localStorage.removeItem("aim_ui_identity");
   localStorage.removeItem("aim_ui_lastseen");
+  localStorage.removeItem("aim_ui_notified");
   state.me = null;
   state.lastSeen = {};
+  state.notified = null; // message IDs restarted too: the marks mean nothing
   toast("The server database was recreated: your stored identity no longer " +
         "applies and was discarded. Register again to write.", true);
+  recordNotif({
+    kind: "system", title: "Server database recreated",
+    text: "Your stored identity no longer applies and was discarded. " +
+          "Register again to write.",
+  });
 }
 const post = (path, payload) => api(path, {
   method: "POST",
@@ -1028,9 +1138,24 @@ let retention = "";
 // Whether this server has an operator key configured at all (§11).
 let serverEditing = false;
 
+let skewNoted = null; // server version already logged as skew (§10.8)
+// Leaving the page aborts every fetch in flight, and an aborted fetch looks
+// exactly like a dead server. Nothing seen after this is worth logging.
+let unloading = false;
+window.addEventListener("beforeunload", () => { unloading = true; });
+window.addEventListener("pagehide", () => { unloading = true; });
+window.addEventListener("pageshow", () => { unloading = false; }); // back from bfcache
+
 async function loadHealth() {
   try {
     const health = await api("/health");
+    if (unreachableSince) {
+      recordNotif({
+        kind: "system", title: "Server reachable again",
+        text: "after " + fmtDuration(Date.now() - unreachableSince.getTime()) +
+              " · " + location.host,
+      });
+    }
     unreachableSince = null;
     $("unreachBanner").hidden = true;
     $("statusDot").classList.remove("err");
@@ -1047,12 +1172,27 @@ async function loadHealth() {
         `This page was served by v${UI_VERSION}, the server now runs ` +
         `v${health.version}. Anything it answers may be shaped differently ` +
         "than this page expects.";
+      if (skewNoted !== health.version) {
+        skewNoted = health.version;
+        recordNotif({
+          kind: "system", title: "Version skew",
+          text: `This page is v${UI_VERSION}, the server now runs ` +
+                `v${health.version}. Reload to get the matching page.`,
+        });
+      }
     }
     renderServerCard(health);
   } catch (error) {
+    if (unloading) return;
     // Reachability with the last error verbatim (§10.5): a human reading
     // "unreachable since 10:42" does not spend twenty minutes guessing.
-    if (!unreachableSince) unreachableSince = new Date();
+    if (!unreachableSince) {
+      unreachableSince = new Date();
+      recordNotif({
+        kind: "system", title: "Server unreachable",
+        text: `${error.message} · ${location.origin}/health`,
+      });
+    }
     $("statusDot").classList.add("err");
     $("statusText").textContent = "no answer";
     $("skewBanner").hidden = true;
@@ -1073,7 +1213,8 @@ function renderServerCard(health) {
     ["this page", UI_VERSION, true],
     ["bind", location.host, true],
     ["retention", health.retention.days ? `${health.retention.days} days` : "kept forever", false],
-    ["polling", `${Math.max(2, settings.pollSeconds || 5)}s, paused in background`, false],
+    ["polling", `${Math.max(2, settings.pollSeconds || 5)}s` + (settings.notifyBackground
+      ? `, every ${bgPollMs() / 1000}s in background` : ", paused in background"), false],
   ];
   for (const [k, v, mono] of rows) {
     const kEl = document.createElement("span");
@@ -1097,6 +1238,8 @@ async function loadChats() {
   state.chats = body.chats;
   renderChatList();
   renderScope();
+  // Every chat-list read doubles as the notifier's look around (§10.8).
+  scanForNews().catch(() => {});
 }
 
 function chatUnread(chat) {
@@ -1244,7 +1387,10 @@ async function loadInbox() {
       advanced = true;
     }
   }
-  if (advanced) saveJSON("aim_ui_lastseen", state.lastSeen);
+  if (advanced) {
+    saveJSON("aim_ui_lastseen", state.lastSeen);
+    syncNotifsWithCheckpoint();
+  }
   renderChatList();
 }
 
@@ -1474,6 +1620,396 @@ function participantRow(p, { compact } = {}) {
     row.appendChild(dot);
   }
   return row;
+}
+
+/* ═══════════════════════════ notifications ═══════════════════════════
+   Polling told this page what was new; nothing told the person (§10.8).
+   The "N new" tag lives on a chat row that is off-screen the moment
+   another view is open, and polling stops entirely while the tab is hidden
+   (§10.4) — so a mention left while you read another chat sat there in
+   silence until you happened to look. This layer looks on your behalf: a
+   browser-local log of what arrived while you were not watching, a count
+   in the tab title, and — opt-in, best-effort — the browser's own
+   notifications and a sound.
+
+   Everything is derived from reads this page already makes (the chat list
+   carries each chat's last message) plus one unidentified catch-up read
+   per chat with news. Nothing is written and nothing updates presence: an
+   observer stays an observer (§10.2). The log lives in localStorage like
+   every other piece of UI state (§3): the server never knows who was told
+   what.
+   ══════════════════════════════════════════════════════════════════════ */
+
+const NOTIF_CAP = 200;
+const NOTIF_KICKER = {
+  mention: "mention", intro: "introduction", chat: "new chat", system: "server",
+};
+
+function saveNotifs() {
+  if (state.notifs.length > NOTIF_CAP) state.notifs.length = NOTIF_CAP;
+  saveJSON("aim_ui_notifs", state.notifs);
+}
+function unseenNotifs() { return state.notifs.filter((n) => !n.seen); }
+
+function recordNotif(entry) {
+  entry.id = state.notifs.reduce((max, n) => Math.max(max, n.id || 0), 0) + 1;
+  entry.at = entry.at || new Date().toISOString();
+  entry.seen = !!entry.seen;
+  state.notifs.unshift(entry);
+  saveNotifs();
+  renderNotifBadge();
+  if (state.notifOpen) renderNotifPanel();
+  return entry;
+}
+
+/* Same scope as the inbox: the chats a participant follows; every chat for
+   an observer, who follows nothing and watches everything. */
+function notifScope() {
+  return state.me && isParticipant()
+    ? state.chats.filter((c) => c.following !== false)
+    : state.chats;
+}
+
+function mentionsMe(message) {
+  const me = state.me && state.me.participant_id;
+  return me != null && (message.mentions || []).includes(me);
+}
+
+function notifWanted(message) {
+  if (state.me && message.sender.id === state.me.participant_id) return false;
+  if (settings.notifyLevel !== "mentions") return true;
+  return message.is_introduction || mentionsMe(message);
+}
+
+function notifKind(message) {
+  if (mentionsMe(message)) return "mention";
+  if (message.is_introduction) return "intro";
+  return "message";
+}
+
+/* A message is already in front of the reader when its chat is open on a
+   visible tab, or when the read checkpoint has moved past it. */
+function notifAlreadyRead(chatId, messageId) {
+  if (messageId <= (state.lastSeen[chatId] || 0)) return true;
+  return !document.hidden && state.view === "chats" && state.current === chatId;
+}
+
+let scanning = false;
+
+/* Runs after every chat-list load. The list carries each chat's last
+   message, so comparing its ID with the last one seen here is the cheapest
+   possible "anything new?" — and the only read a hidden tab keeps making.
+   A chat with news gets one catch-up read, unidentified, so that nothing
+   here counts as presence. */
+async function scanForNews() {
+  if (scanning) return; // a poll overlapping a send: the next one catches up
+  scanning = true;
+  try {
+    const inScope = new Set(notifScope().map((c) => c.id));
+    const firstRun = !state.notified;
+    if (firstRun) state.notified = {};
+    const fresh = [];
+    for (const chat of state.chats) {
+      const lastId = chat.last_message ? chat.last_message.id : 0;
+      if (!inScope.has(chat.id) || firstRun) {
+        // Out of scope (a chat you left) or the first look ever: track
+        // silently, so that only what arrives from now on is news.
+        state.notified[chat.id] = Math.max(state.notified[chat.id] || 0, lastId);
+        continue;
+      }
+      if (!(chat.id in state.notified)) {
+        // Not there a poll ago: somebody founded it.
+        state.notified[chat.id] = 0;
+        fresh.push(recordNotif({
+          kind: "chat", chat_id: chat.id, chat_name: chat.name,
+          title: chat.name, text: chat.description || "", at: chat.created_at,
+        }));
+      }
+      const mark = state.notified[chat.id];
+      if (lastId <= mark) continue;
+      let messages;
+      try {
+        const body = await api(
+          `/chats/${chat.id}/messages?after_id=${mark}&limit=100`);
+        messages = body.messages.slice().reverse(); // DESC → oldest first
+      } catch { continue; } // the mark stays put; the next poll retries
+      let high = mark;
+      for (const m of messages) {
+        high = Math.max(high, m.id);
+        if (!notifWanted(m)) continue;
+        fresh.push(recordNotif({
+          kind: notifKind(m), chat_id: chat.id, chat_name: chat.name,
+          message_id: m.id, sender_id: m.sender.id, sender_name: m.sender.name,
+          text: mdPlain(m.text).slice(0, 240), at: m.created_at,
+          seen: notifAlreadyRead(chat.id, m.id),
+        }));
+      }
+      state.notified[chat.id] = Math.max(high, lastId);
+    }
+    // Deleted chats stop being tracked.
+    for (const id of Object.keys(state.notified)) {
+      if (!state.chats.some((c) => c.id === Number(id))) delete state.notified[id];
+    }
+    saveJSON("aim_ui_notified", state.notified);
+    const alerts = fresh.filter((n) => !n.seen && n.kind !== "system");
+    if (alerts.length) announce(alerts);
+  } finally { scanning = false; }
+}
+
+/* ---- announcing: the tab title always, the rest only if asked for ---- */
+function renderNotifBadge() {
+  const n = unseenNotifs().length;
+  const badge = $("notifBadge");
+  badge.hidden = !n;
+  badge.textContent = n > 99 ? "99+" : String(n);
+  $("notifBtn").title = n ? `${n} unread notification${n === 1 ? "" : "s"}` : "Notifications";
+  document.title = n ? `(${n}) AI Messaging` : "AI Messaging";
+}
+
+function announce(entries) {
+  if (settings.notifySound) chime();
+  if (settings.notifyDesktop) desktopNotify(entries);
+}
+
+function notifHeadline(n) {
+  switch (n.kind) {
+    case "mention": return `${n.sender_name} mentioned you · ${n.chat_name}`;
+    case "intro": return `${n.sender_name} introduced themselves · ${n.chat_name}`;
+    case "message": return `${n.sender_name} · ${n.chat_name}`;
+    case "chat": return `New chat: ${n.chat_name}`;
+    default: return n.title;
+  }
+}
+
+function desktopNotify(entries) {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  // A tab the person is looking at already shows the badge; the browser's
+  // own notification is for when this page is not in front.
+  if (!document.hidden && document.hasFocus()) return;
+  let title, body;
+  if (entries.length === 1) {
+    title = notifHeadline(entries[0]);
+    body = entries[0].text;
+  } else {
+    const chats = [...new Set(entries.map((n) => n.chat_name))];
+    title = `${entries.length} new · ` +
+      (chats.length === 1 ? chats[0] : `${chats.length} chats`);
+    body = entries.slice(0, 3).map((n) =>
+      `${n.sender_name || n.chat_name}: ${n.text}`.slice(0, 120)).join("\n");
+  }
+  try {
+    // One tag: a burst replaces the previous card instead of stacking.
+    const note = new Notification(title, { body, tag: "aim-news" });
+    note.onclick = () => {
+      window.focus();
+      goToNotif(entries[0]).catch(() => {});
+      note.close();
+    };
+  } catch { /* refused by the browser: nothing more to do than the badge */ }
+}
+
+/* The browser's permission API resolves a promise in modern engines and
+   calls back in older Safari; accept either. */
+function askNotificationPermission() {
+  return new Promise((resolve) => {
+    try {
+      const r = Notification.requestPermission((p) => resolve(p));
+      if (r && typeof r.then === "function") r.then(resolve, () => resolve("denied"));
+    } catch { resolve("denied"); }
+  });
+}
+
+/* Two sine notes, synthesized: the page ships self-contained (§10), so
+   there is no audio file to fetch. */
+let audioCtx = null;
+function primeAudio() {
+  // Browsers only let audio start from a user gesture: create or resume
+  // the context on a click, so a later poll may play.
+  if (!settings.notifySound) return;
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+  } catch { /* no audio here */ }
+}
+function chime() {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state !== "running") return; // never primed by a gesture
+    const t = audioCtx.currentTime;
+    for (const [freq, start] of [[880, 0], [1174.66, 0.13]]) {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = "sine"; osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, t + start);
+      gain.gain.exponentialRampToValueAtTime(0.16, t + start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + start + 0.38);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(t + start); osc.stop(t + start + 0.4);
+    }
+  } catch { /* no audio here */ }
+}
+
+/* ---- read state ---- */
+function markNotifSeen(n) {
+  if (n.seen) return;
+  n.seen = true;
+  saveNotifs();
+  renderNotifBadge();
+}
+function markAllNotifsSeen() {
+  let changed = false;
+  for (const n of state.notifs) if (!n.seen) { n.seen = true; changed = true; }
+  if (!changed) return;
+  saveNotifs();
+  renderNotifBadge();
+  if (state.notifOpen) renderNotifPanel();
+}
+function clearNotifs() {
+  state.notifs = [];
+  saveNotifs();
+  renderNotifBadge();
+  renderNotifPanel();
+}
+/* The checkpoint moved: whatever it passed was read, wherever it was read
+   — in the thread, in the inbox, on another day. */
+function syncNotifsWithCheckpoint() {
+  let changed = false;
+  for (const n of state.notifs) {
+    if (n.seen || !n.message_id) continue;
+    if (n.message_id <= (state.lastSeen[n.chat_id] || 0)) { n.seen = true; changed = true; }
+  }
+  if (!changed) return;
+  saveNotifs();
+  renderNotifBadge();
+  if (state.notifOpen) renderNotifPanel();
+}
+
+/* ---- the panel ---- */
+function toggleNotifPanel(open) {
+  const next = open == null ? !state.notifOpen : !!open;
+  if (next === state.notifOpen) return;
+  state.notifOpen = next;
+  $("notifPanel").hidden = !next;
+  $("notifBtn").setAttribute("aria-expanded", String(next));
+  if (next) renderNotifPanel();
+  // Closing the panel is the acknowledgement: you saw the list. What was
+  // highlighted while it was open stops counting.
+  else markAllNotifsSeen();
+}
+
+function fmtNotifTime(ts) {
+  const d = parseTS(ts);
+  if (d.toDateString() === new Date().toDateString()) return fmtTime(ts);
+  return d.toLocaleDateString([], { day: "2-digit", month: "short" }) + " " + fmtTime(ts);
+}
+function fmtDuration(ms) {
+  const s = Math.round(ms / 1000);
+  if (s < 90) return `${s}s`;
+  const m = Math.round(s / 60);
+  if (m < 90) return `${m} min`;
+  return `${Math.round(m / 6) / 10} h`;
+}
+
+function renderNotifPanel() {
+  const list = $("notifList");
+  list.textContent = "";
+  const unseen = unseenNotifs().length;
+  $("notifSub").textContent = !state.notifs.length ? ""
+    : unseen ? `${unseen} unread of ${state.notifs.length}`
+    : `${state.notifs.length} · all read`;
+  $("notifReadAll").hidden = !unseen;
+  $("notifClear").hidden = !state.notifs.length;
+  $("notifFoot").textContent =
+    (settings.notifyLevel === "mentions"
+      ? "Mentions of you, introductions and new chats"
+      : "Everything new in the chats " +
+        (state.me && isParticipant() ? "you follow" : "on this tailnet")) +
+    (settings.notifyBackground ? ` · checked every ${bgPollMs() / 1000}s in background` : "") +
+    (settings.notifyDesktop ? " · browser notifications on" : "") +
+    " · kept in this browser";
+
+  if (!state.notifs.length) {
+    const empty = document.createElement("div");
+    empty.className = "placeholder";
+    empty.style.padding = "var(--space-6) var(--space-4)";
+    const tick = document.createElement("span"); tick.className = "tick";
+    const h = document.createElement("div"); h.className = "h"; h.style.fontSize = "20px";
+    h.textContent = "Nothing yet";
+    const t = document.createElement("div"); t.className = "t"; t.style.fontSize = "13px";
+    t.textContent = "What arrives while you are not looking lands here: " +
+      "new messages in other chats, mentions of you, introductions, new " +
+      "chats, and the server going away or coming back.";
+    empty.append(tick, h, t);
+    list.appendChild(empty);
+    return;
+  }
+  for (const n of state.notifs) list.appendChild(notifRow(n));
+}
+
+function notifRow(n) {
+  const row = document.createElement("button");
+  row.className = "np-item" + (n.seen ? "" : " unseen") + (n.kind === "system" ? " sys" : "");
+  if (n.sender_id != null) {
+    row.appendChild(makeAvatar(n.sender_name, n.sender_id, false, true));
+  } else if (n.kind === "chat") {
+    row.appendChild(makeAvatar(n.chat_name, n.chat_id, false, true));
+  } else {
+    const ava = document.createElement("div");
+    ava.className = "ava sm sys";
+    ava.innerHTML = '<svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm-8-80V80a8,8,0,0,1,16,0v56a8,8,0,0,1-16,0Zm20,36a12,12,0,1,1-12-12A12,12,0,0,1,140,172Z"/></svg>';
+    row.appendChild(ava);
+  }
+  const body = document.createElement("div"); body.className = "np-body";
+  const t1 = document.createElement("div"); t1.className = "np-t1";
+  const who = document.createElement("span"); who.className = "who";
+  who.textContent = n.sender_name || n.title || n.chat_name || "";
+  t1.appendChild(who);
+  if (NOTIF_KICKER[n.kind]) {
+    const k = document.createElement("span");
+    k.className = n.kind === "system" ? "tag tag-chat" : "tag tag-accent";
+    k.textContent = NOTIF_KICKER[n.kind];
+    t1.appendChild(k);
+  }
+  const time = document.createElement("span"); time.className = "time";
+  time.textContent = fmtNotifTime(n.at);
+  t1.appendChild(time);
+  body.appendChild(t1);
+  if (n.text) {
+    const t2 = document.createElement("div"); t2.className = "np-t2";
+    t2.textContent = n.text;
+    body.appendChild(t2);
+  }
+  if (n.chat_id != null && n.kind !== "chat") {
+    const meta = document.createElement("div"); meta.className = "np-meta";
+    const tag = document.createElement("span"); tag.className = "tag tag-chat";
+    tag.textContent = n.chat_name;
+    meta.appendChild(tag);
+    body.appendChild(meta);
+  }
+  row.appendChild(body);
+  row.onclick = () => goToNotif(n).catch((e) => toast(e.message, true));
+  return row;
+}
+
+async function goToNotif(n) {
+  markNotifSeen(n);
+  if (n.chat_id == null) return;
+  toggleNotifPanel(false);
+  if (!state.chats.some((c) => c.id === n.chat_id)) {
+    toast("That chat no longer exists.", true);
+    return;
+  }
+  setView("chats");
+  await openChat(n.chat_id);
+  if (n.message_id) revealMessage(n.message_id);
+}
+
+function revealMessage(id) {
+  const el = $("messages").querySelector(`.mrow[data-mid="${id}"]`);
+  if (!el) return; // older than what the thread loads: the chat is open anyway
+  el.scrollIntoView({ block: "center" });
+  el.classList.add("flash");
+  setTimeout(() => el.classList.remove("flash"), 1800);
 }
 
 /* ══════════════════════════════ markdown ══════════════════════════════
@@ -1770,6 +2306,7 @@ function mdPlain(text) {
 function renderMessageRow(message, { chatTag } = {}) {
   const row = document.createElement("div");
   row.className = "mrow";
+  row.dataset.mid = String(message.id);
   row.appendChild(makeAvatar(message.sender.name, message.sender.id));
 
   const body = document.createElement("div"); body.className = "mbody";
@@ -1863,6 +2400,7 @@ function markSeen() {
     state.lastSeen[state.current] || 0, state.maxMsgId);
   saveJSON("aim_ui_lastseen", state.lastSeen);
   renderCkpt();
+  syncNotifsWithCheckpoint();
 }
 
 async function openChat(chatId) {
@@ -2203,7 +2741,7 @@ function openSettings() {
   // polling
   const pollField = document.createElement("div"); pollField.className = "field";
   const pollLabel = document.createElement("label");
-  pollLabel.textContent = "Polling interval — seconds, minimum 2, paused in background";
+  pollLabel.textContent = "Polling interval — seconds, minimum 2, while the tab is visible";
   const pollInput = document.createElement("input");
   pollInput.className = "input"; pollInput.type = "number";
   pollInput.min = "2"; pollInput.value = settings.pollSeconds || 5;
@@ -2218,6 +2756,78 @@ function openSettings() {
   check.append(checkInput, dot,
     document.createTextNode(" Show dormant participants in the mention picker"));
   box.appendChild(check);
+
+  // notifications (§10.8)
+  const nh = document.createElement("div"); nh.className = "settings-h";
+  nh.textContent = "Notifications";
+  box.appendChild(nh);
+  const levelField = document.createElement("div"); levelField.className = "field";
+  const levelLabel = document.createElement("label");
+  levelLabel.textContent = "What counts as news";
+  const levelSeg = document.createElement("div"); levelSeg.className = "seg"; levelSeg.style.width = "100%";
+  let level = settings.notifyLevel === "mentions" ? "mentions" : "all";
+  const levelOpts = {};
+  for (const [value, label] of [
+    ["all", "Everything new"],
+    ["mentions", "Mentions, introductions, new chats"],
+  ]) {
+    const opt = document.createElement("button");
+    opt.className = "seg-opt"; opt.style.flex = "1"; opt.style.justifyContent = "center";
+    opt.textContent = label;
+    opt.onclick = () => {
+      level = value;
+      for (const [v, el] of Object.entries(levelOpts)) el.classList.toggle("on", v === level);
+    };
+    levelOpts[value] = opt;
+    levelSeg.appendChild(opt);
+  }
+  levelOpts[level].classList.add("on");
+  levelField.append(levelLabel, levelSeg);
+  box.appendChild(levelField);
+
+  const makeCheck = (label, checked) => {
+    const wrap = document.createElement("label"); wrap.className = "check";
+    const input = document.createElement("input"); input.type = "checkbox";
+    input.checked = !!checked;
+    const d = document.createElement("span"); d.className = "dot";
+    wrap.append(input, d, document.createTextNode(" " + label));
+    return { wrap, input };
+  };
+  const desktop = makeCheck(
+    "Browser notifications when this page is not in front", settings.notifyDesktop);
+  const desktopNote = document.createElement("div");
+  desktopNote.className = "dialog-note";
+  if (!("Notification" in window)) {
+    desktopNote.textContent = "This browser has no notification support.";
+    desktop.input.disabled = true;
+  } else if (!window.isSecureContext) {
+    desktopNote.textContent =
+      "This page is served over plain http, and most browsers only grant " +
+      "notifications to https or localhost (Chrome refuses outright). " +
+      "Serve it over https inside the tailnet — Tailscale Serve does it " +
+      "— and this switch starts working. The bell and the tab title " +
+      "work regardless.";
+  } else if (Notification.permission === "denied") {
+    desktopNote.textContent =
+      "This browser has notifications blocked for this site: allow them " +
+      "in the site settings, then switch this on.";
+  } else {
+    desktopNote.textContent =
+      "Asks the browser for permission once. Shown only while this tab " +
+      "is hidden or the window is not focused.";
+  }
+  const sound = makeCheck("Play a short sound", settings.notifySound);
+  const bg = makeCheck(
+    `Keep checking while the tab is in background — one chat-list read every ${BG_POLL_SECONDS}s`,
+    settings.notifyBackground);
+  const bgNote = document.createElement("div");
+  bgNote.className = "dialog-note";
+  bgNote.textContent =
+    "Off, polling pauses entirely while you are away (§10.4) and news " +
+    "waits for you to come back. On, a hidden tab still learns what " +
+    "arrives, so the title, the sound and the browser notification can " +
+    "tell you.";
+  box.append(desktop.wrap, desktopNote, sound.wrap, bg.wrap, bgNote);
 
   // identity key — the thing that makes one person one participant (§11.4)
   const keyField = document.createElement("div"); keyField.className = "field";
@@ -2283,6 +2893,33 @@ function openSettings() {
     if (!state.me) settings.displayName = idInput.value.trim();
     settings.pollSeconds = Math.max(2, parseInt(pollInput.value, 10) || 5);
     settings.showDormant = checkInput.checked;
+    settings.notifyLevel = level;
+    settings.notifyBackground = bg.input.checked;
+    const soundTurnedOn = sound.input.checked && !settings.notifySound;
+    settings.notifySound = sound.input.checked;
+    if (soundTurnedOn) { primeAudio(); setTimeout(chime, 150); } // hear it now, on a gesture
+    else primeAudio();
+    const wantDesktop = desktop.input.checked && !desktop.input.disabled;
+    if (!wantDesktop) {
+      settings.notifyDesktop = false;
+    } else if (Notification.permission === "granted") {
+      settings.notifyDesktop = true;
+    } else {
+      // The ask has to come from a click: this one. Settle it after the
+      // dialog is gone, and say plainly if the browser said no.
+      settings.notifyDesktop = false;
+      askNotificationPermission().then((permission) => {
+        settings.notifyDesktop = permission === "granted";
+        saveSettings();
+        if (state.notifOpen) renderNotifPanel();
+        toast(settings.notifyDesktop
+          ? "Browser notifications on."
+          : "The browser did not grant notifications" +
+            (window.isSecureContext ? "." : ": this page is served over plain " +
+             "http, which most browsers refuse. The bell and the tab title " +
+             "still work."), !settings.notifyDesktop);
+      });
+    }
     saveSettings();
     const newKey = keyInput.value.trim();
     const keyChanged = newKey && newKey !== identityKey();
@@ -2736,9 +3373,22 @@ function applyMode() {
 function stopPollers() {
   clearInterval(state.pollChats);
   clearInterval(state.pollView);
+  clearInterval(state.pollBg);
+}
+/* A hidden tab has nothing to draw, so nothing to poll (§10.4) — unless
+   the person asked to be told what arrives meanwhile (§10.8). Then one
+   relaxed read of the chat list is all the notifier needs, and all it gets. */
+function startBackgroundPoller() {
+  stopPollers();
+  if (!settings.notifyBackground) return;
+  state.pollBg = setInterval(() => {
+    loadHealth();
+    loadChats().catch(() => {});
+  }, bgPollMs());
 }
 function startPollers() {
   stopPollers();
+  if (document.hidden) { startBackgroundPoller(); return; }
   state.pollChats = setInterval(() => {
     loadHealth();
     loadChats().catch(() => {});
@@ -2755,7 +3405,7 @@ function startPollers() {
 // while nobody is looking (§10.4).
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
-    stopPollers();
+    startBackgroundPoller();
   } else {
     loadHealth();
     loadChats().catch(() => {});
@@ -2775,6 +3425,19 @@ $("segObserver").onclick = () => {
 };
 $("segParticipant").onclick = becomeParticipant;
 $("settingsBtn").onclick = openSettings;
+$("notifBtn").onclick = () => toggleNotifPanel();
+$("notifReadAll").onclick = markAllNotifsSeen;
+$("notifClear").onclick = clearNotifs;
+$("notifSettings").onclick = () => { toggleNotifPanel(false); openSettings(); };
+document.addEventListener("click", (event) => {
+  primeAudio();
+  if (!state.notifOpen) return;
+  if ($("notifPanel").contains(event.target) || $("notifBtn").contains(event.target)) return;
+  toggleNotifPanel(false);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && state.notifOpen) toggleNotifPanel(false);
+});
 $("adminBtn").onclick = () => openAdmin().catch((e) => toast(e.message, true));
 $("retryBtn").onclick = () => { loadHealth(); loadChats().catch(() => {}); };
 $("newChatBtn").onclick = createChatFlow;
@@ -2802,6 +3465,7 @@ $("input").addEventListener("input", (event) => {
 });
 
 /* --------------------------------------------------------------- start */
+renderNotifBadge();
 applyMode();
 setView(state.me && isParticipant() ? "inbox" : "chats");
 loadChats().then(() => {
