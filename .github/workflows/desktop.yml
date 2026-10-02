@@ -1,0 +1,70 @@
+name: Desktop app (Windows)
+
+# The desktop app is a Windows binary and its notification backend is
+# WinRT, so it is tested and built where it runs. Every push produces the
+# zipped build as a workflow artifact; a `desktop-v*` tag attaches it to
+# a GitHub release.
+
+on:
+  push:
+    branches: [main]
+    tags: ["desktop-v*"]
+    paths:
+      - "desktop/**"
+      - "server/aim_server/static/ui.html"
+      - ".github/workflows/desktop.yml"
+  pull_request:
+    paths:
+      - "desktop/**"
+      - "server/aim_server/static/ui.html"
+      - ".github/workflows/desktop.yml"
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install the app with its Windows backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ./desktop[dev,build]
+
+      - name: Desktop suite (with windows-toasts importable)
+        working-directory: desktop
+        run: python -m pytest -q
+
+      - name: Build the executable
+        working-directory: desktop
+        run: python build.py
+
+      - name: Smoke test the build
+        shell: pwsh
+        working-directory: desktop
+        run: |
+          $exe = "dist/AI Messaging/AI Messaging.exe"
+          if (-not (Test-Path $exe)) { throw "missing $exe" }
+          if (-not (Test-Path "dist/AI Messaging/_internal/aim_desktop/assets/setup.html")) { throw "assets not collected" }
+          Get-ChildItem "dist/AI Messaging" | Select-Object Name, Length
+
+      - name: Zip
+        shell: pwsh
+        working-directory: desktop
+        run: Compress-Archive -Path "dist/AI Messaging" -DestinationPath "aim-desktop-windows.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aim-desktop-windows
+          path: desktop/aim-desktop-windows.zip
+          if-no-files-found: error
+
+      - name: Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: desktop/aim-desktop-windows.zip
+          generate_release_notes: true

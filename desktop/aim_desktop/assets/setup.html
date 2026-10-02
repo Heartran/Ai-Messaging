@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Messaging — server</title>
+<style>
+  :root {
+    --bg: #0f1115; --surface: #171a21; --text: #e6e8ee; --muted: #8b93a7;
+    --accent: #6ee7b7; --accent-dim: #2f5f4c; --err: #f87171; --divider: #262b36;
+    --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, "Segoe UI", sans-serif;
+    display: grid; place-items: center; padding: 24px;
+  }
+  .card {
+    width: min(560px, 100%); background: var(--surface); border-radius: 12px;
+    padding: 28px 32px 24px; box-shadow: inset 0 0 0 1px var(--divider);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+  .brand .tick { width: 2px; height: 18px; background: var(--accent); }
+  .brand b { font-weight: 600; letter-spacing: .02em; }
+  .brand small { color: var(--muted); font-family: var(--mono); }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 6px; }
+  p { margin: 0 0 14px; color: var(--muted); }
+  code { font-family: var(--mono); color: var(--text); }
+  label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  input {
+    width: 100%; font: inherit; font-family: var(--mono); color: var(--text);
+    background: var(--bg); border: 1px solid var(--divider); border-radius: 8px;
+    padding: 10px 12px; outline: none;
+  }
+  input:focus { border-color: var(--accent); }
+  .row { display: flex; gap: 10px; align-items: center; margin-top: 14px; }
+  button {
+    font: inherit; font-weight: 600; cursor: pointer; border-radius: 8px;
+    padding: 9px 16px; border: 1px solid var(--accent); color: var(--accent);
+    background: transparent;
+  }
+  button:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  button:disabled { opacity: .5; cursor: default; }
+  .err { color: var(--err); font-size: 13.5px; margin-top: 12px; white-space: pre-wrap; }
+  .err:empty { display: none; }
+  .note { font-size: 13px; color: var(--muted); margin-top: 18px; padding-top: 14px;
+          border-top: 1px solid var(--divider); }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="brand"><span class="tick"></span><b>AI Messaging</b><small>desktop v__VERSION__</small></div>
+  <h1>Where is the server?</h1>
+  <p>The tailnet address of the central server — on that machine, <code>tailscale ip -4</code>
+     gives it. This app connects inside the tailnet only, like everything else here.</p>
+  <label for="url">Server address</label>
+  <input id="url" value="__CURRENT__" placeholder="http://100.101.102.103:8422" autofocus spellcheck="false">
+  <div class="row">
+    <button id="go">Connect</button>
+    <span id="busy" style="color:var(--muted);font-size:13px" hidden>Checking…</span>
+  </div>
+  <div class="err" id="err">__ERROR__</div>
+  <div class="note">
+    Accepted: a Tailscale IP (<code>100.64.0.0/10</code>), a MagicDNS name (<code>*.ts.net</code>,
+    for https via Tailscale Serve), or — for local development with
+    <code>AIM_ALLOW_LOOPBACK=1</code> — a loopback address. The default port is 8422.
+  </div>
+</div>
+<script>
+"use strict";
+const input = document.getElementById("url");
+const button = document.getElementById("go");
+const busy = document.getElementById("busy");
+const err = document.getElementById("err");
+
+async function connect() {
+  const api = window.pywebview && window.pywebview.api;
+  if (!api) { err.textContent = "The desktop bridge is not ready yet; try again in a moment."; return; }
+  button.disabled = true; busy.hidden = false; err.textContent = "";
+  try {
+    const result = await api.configure_server(input.value);
+    if (!result.ok) err.textContent = result.error;
+    // ok: the host is already loading the UI.
+  } catch (e) {
+    err.textContent = String(e && e.message || e);
+  } finally {
+    button.disabled = false; busy.hidden = true;
+  }
+}
+button.onclick = connect;
+input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") connect(); });
+</script>
+</body>
+</html>

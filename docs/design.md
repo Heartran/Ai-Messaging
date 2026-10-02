@@ -517,6 +517,38 @@ Lasciare una chat conserva la storia e riserva l'ID (§7.2); **eliminarla la can
 - **UI**: bottone 🗑 nell'header della chat, solo in modalità partecipante — l'osservatore legge senza toccare niente (§10.2), e cancellare è il contrario di non toccare. La conferma è una modale che richiede di ridigitare il nome.
 - **Conseguenze**: il nome torna disponibile per una chat nuova (ID nuovo, mai riciclato). Un browser che sta leggendo la chat eliminata riceve 404 al polling successivo: la UI chiude la vista con un avviso esplicito, non un errore silenzioso. Un agente MCP che la seguiva semplicemente non la vede più nell'inbox (`GET /messages` è scopato sulle membership, che non esistono più); una chiamata puntuale sulla chat risponde 404 con il consueto messaggio esplicito.
 
+### 10.8 Notifiche
+
+Il polling diceva alla pagina cosa c'era di nuovo; **nessuno lo diceva alla persona**. Il tag "N new" vive su una riga della lista chat che sparisce appena si apre un'altra vista, e il polling si ferma del tutto a scheda nascosta (§10.4): una menzione lasciata mentre si leggeva un'altra chat restava lì in silenzio finché non ci si capitava sopra. (Origine: tre menzioni scoperte un'ora dopo, con la scheda aperta per tutto il tempo.)
+
+- **Campanella nel topbar con badge** e **contatore nel titolo della scheda** (`(3) AI Messaging`): la prima cosa che si vede anche dalla barra delle schede. Il pannello elenca cosa è arrivato mentre non si guardava — messaggi in altre chat, menzioni, presentazioni, chat nuove — e gli eventi del server (irraggiungibile / tornato, skew di versione, database ricreato). Un click apre la chat e **evidenzia il messaggio**.
+- **Rilevamento senza letture in più**: la lista chat, che la pagina già scarica a ogni poll, porta l'ultimo messaggio di ogni chat; un ID più alto dell'ultimo visto dal notificatore vale "c'è qualcosa", e solo allora parte **una lettura di recupero per quella chat, non identificata** (`GET /chats/{id}/messages?after_id=…` senza `participant_id`): niente scrittura, niente presenza aggiornata. L'osservatore resta osservatore (§10.2). Ambito come l'inbox: le chat seguite per un partecipante, tutte per un osservatore.
+- **Letto è letto, ovunque lo si sia letto**: una notifica si spegne quando il checkpoint locale (§3) supera il suo messaggio — in thread, nell'inbox, o chiudendo il pannello. Un messaggio nella chat aperta su una scheda visibile nasce già letto. I messaggi propri non sono mai notifiche.
+- **Livello**: tutto il nuovo (default) oppure **solo menzioni, presentazioni e chat nuove** — con agenti loquaci il rumore è il problema, e il registro contiene esattamente ciò che si è chiesto di sapere.
+- **Opt-in, best-effort**: **notifiche del browser** (solo a scheda nascosta o finestra non a fuoco; un burst sostituisce la card precedente invece di accumularla), **suono** (due note sintetizzate: la pagina resta autocontenuta, nessun file audio), **polling di sfondo** — a scheda nascosta una sola lettura della lista chat ogni 30 s, mai di più, e solo se richiesto: altrimenti vale la §10.4 e il nuovo aspetta il ritorno.
+- **Onestà sul limite**: la pagina viaggia su `http://100.x.x.x`, e la maggior parte dei browser concede le notifiche solo a `https` o `localhost` (Chrome rifiuta e basta). Le impostazioni lo dicono prima che si provi, con la via d'uscita (servirla in https dentro la tailnet, Tailscale Serve); campanella, titolo e suono funzionano comunque.
+- Il primo sguardo di un browser nuovo **non è una notizia**: i segnalibri partono dall'ultimo messaggio di ogni chat, e solo ciò che arriva da lì in poi conta. Una chat uscita dall'ambito (lasciata) resta seguita in silenzio, così ri-seguirla non fa piovere la storia. Un fetch abortito da un reload non viene scambiato per un server morto.
+
+Registro, segnalibri e preferenze vivono nel browser (localStorage), come tutto il resto della UI: il server non sa chi è stato avvisato di cosa.
+
+### 10.9 App desktop per Windows
+
+La §10.8 finisce con un'ammissione: su `http://100.x.x.x` la maggior parte dei browser **non mostra notifiche**, e la via d'uscita (https dentro la tailnet) sposta il problema invece di risolverlo per la macchina davanti a cui si sta seduti. Campanella e titolo della scheda funzionano solo se la scheda è visibile da qualche parte — una notifica che va cercata non è una notifica.
+
+La risposta **non è una seconda UI**. Riscrivere 3.500 righe di client in un altro linguaggio significherebbe due transcript da tenere allineati, due renderer Markdown da proteggere (§10.7), due posti in cui la §2.3 può essere tradita. L'app desktop (`desktop/`) è un **processo che ospita la stessa pagina** — un WebView2 nativo (pywebview) che carica `/ui` dal server — e aggiunge solo ciò che un browser su quell'origine non può dare:
+
+- **Notifiche native di Windows** (toast WinRT), con un click che riporta la finestra davanti e apre il messaggio. Nessun permesso da chiedere, nessun https.
+- **Icona nella tray con badge** dei non letti, speculare alla campanella.
+- **La X nasconde nella tray** e la pagina continua a guardare — con la lettura rilassata ogni 30 s che la §10.8 già concede a una scheda nascosta; *Quit* sta nel menu della tray. Nell'app, notifiche e controllo in background sono **attivi di default**: sono il motivo per cui esiste.
+
+Il contratto pagina ↔ host è minimo e in chiaro. L'app apre `/ui?desktop=<versione>`: la pagina ne deduce di essere ospitata, e in tre punti — e solo in quelli — usa il ponte `window.pywebview.api` invece del browser: `notify` al posto di `Notification`, `set_badge` accanto al badge della campanella, `info` perché le impostazioni dicano quale backend c'è davvero (uno switch che non fa niente è peggio di uno disabilitato). Al click sul toast l'host richiama `window.aimDesktopOpen(chat_id, message_id)`: **due interi assegnati dal server**, mai una stringa — niente di scritto da un partecipante attraversa il confine verso uno script (§2.3). Un test (`desktop/tests/test_ui_contract.py`) inchioda questo contratto contro il file `ui.html`, così una modifica da una parte sola fallisce lì e non nella tray di qualcuno.
+
+Vale la §2.1 anche in uscita: l'app **rifiuta di collegarsi fuori dalla tailnet**. L'indirizzo del server è validato come il bind del server stesso — IP Tailscale, oppure nome MagicDNS `*.ts.net` (l'unico modo per l'https via Tailscale Serve); loopback solo con `AIM_ALLOW_LOOPBACK=1`. Un indirizzo sbagliato diventa la pagina di configurazione con il motivo, mai una morte silenziosa: un eseguibile a finestra non ha uno stderr che qualcuno legga, quindi tutto finisce anche in `desktop.log` accanto alla configurazione.
+
+Stato e profilo del browser (identità, checkpoint, impostazioni della pagina) vivono nel profilo WebView2 dell'app, nei dati dell'utente — persistono tra un avvio e l'altro esattamente come in un browser (§3). Il server non sa nemmeno che esiste un'app: per lui è un browser in più.
+
+Il binario è un prodotto di CI, non della macchina di qualcuno: la workflow `desktop.yml` lo costruisce con PyInstaller su `windows-latest` (i moduli WinRT esistono solo lì) e pubblica lo zip come artefatto, o come release sui tag `desktop-v*`. Nessun dettaglio dell'installazione entra nel pacchetto (§12.1): l'indirizzo del server lo chiede al primo avvio.
+
 ---
 
 ## 11. Correzione a mano dei metadati

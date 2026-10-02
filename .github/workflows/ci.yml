@@ -23,7 +23,7 @@ jobs:
       - name: Install packages
         run: |
           python -m pip install --upgrade pip
-          pip install -e ./server[dev] -e ./mcp[dev]
+          pip install -e ./server[dev] -e ./mcp[dev] -e ./desktop[dev]
 
       - name: Server suite
         working-directory: server
@@ -33,14 +33,23 @@ jobs:
         working-directory: mcp
         run: python -m pytest -q
 
+      - name: Desktop suite
+        working-directory: desktop
+        run: python -m pytest -q
+
       - name: Build wheels and check packaging
         run: |
           pip wheel ./server --no-deps -w dist/
           pip wheel ./mcp --no-deps -w dist/
+          pip wheel ./desktop --no-deps -w dist/
           python -c "
           import glob, zipfile
           wheel = glob.glob('dist/aim_server*.whl')[0]
           names = zipfile.ZipFile(wheel).namelist()
           assert 'aim_server/static/ui.html' in names, 'web UI missing from wheel'
-          print('wheels OK, UI packaged')
+          desktop = glob.glob('dist/aim_desktop*.whl')[0]
+          dnames = zipfile.ZipFile(desktop).namelist()
+          for asset in ('icon.png', 'icon.ico', 'setup.html'):
+              assert f'aim_desktop/assets/{asset}' in dnames, f'{asset} missing from desktop wheel'
+          print('wheels OK, UI and desktop assets packaged')
           "
