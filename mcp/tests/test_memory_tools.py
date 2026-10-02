@@ -121,7 +121,8 @@ async def test_the_mcp_server_exposes_the_memory_tools(monkeypatch):
     } <= names
 
     store = next(tool for tool in await mcp.list_tools() if tool.name == "aim_store_memory")
-    schema = store.inputSchema
+    # MCP SDK 1.x spells it inputSchema, 2.x input_schema; CI runs both.
+    schema = getattr(store, "input_schema", None) or store.inputSchema
     assert "client_session_key" in schema["required"]
     assert "memory_type" in schema["required"]
     memory_type = schema["properties"]["memory_type"]
