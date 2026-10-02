@@ -17,7 +17,7 @@ MIN_SERVER_VERSION = "0.8.0"
 # The server version this client was built against. Any drift — in either
 # direction — is surfaced to the agent as a version_warning in the payload
 # (design §7): version skew must never masquerade as a mystery bug again.
-EXPECTED_SERVER_VERSION = "0.14.0"
+EXPECTED_SERVER_VERSION = "0.15.0"
 
 
 def _parse_version(version: str) -> tuple[int, ...]:
@@ -289,6 +289,100 @@ class AimClient:
     async def participant_chats(self, participant_id: int) -> dict[str, Any]:
         return await self._request(
             "GET", f"/participants/{participant_id}/chats"
+        )
+
+    # --------------------------------------------------------------- memory
+
+    async def store_memory(
+        self, participant_id: int, memory: dict[str, Any], token: str | None = None
+    ) -> dict[str, Any]:
+        return await self._request(
+            "POST",
+            "/memories",
+            json={"participant_id": participant_id, **_drop_none(memory)},
+            token=token,
+        )
+
+    async def search_memories(
+        self, token: str | None = None, **params: Any
+    ) -> dict[str, Any]:
+        return await self._request(
+            "GET", "/memories", params=_drop_none(params), token=token
+        )
+
+    async def get_memory(
+        self, memory_id: int, participant_id: int, token: str | None = None
+    ) -> dict[str, Any]:
+        return await self._request(
+            "GET",
+            f"/memories/{memory_id}",
+            params={"participant_id": participant_id},
+            token=token,
+        )
+
+    async def update_memory(
+        self,
+        memory_id: int,
+        participant_id: int,
+        changes: dict[str, Any],
+        token: str | None = None,
+    ) -> dict[str, Any]:
+        return await self._request(
+            "PATCH",
+            f"/memories/{memory_id}",
+            json={"participant_id": participant_id, **_drop_none(changes)},
+            token=token,
+        )
+
+    async def supersede_memory(
+        self,
+        memory_id: int,
+        participant_id: int,
+        superseding_memory_id: int,
+        reason: str | None,
+        token: str | None = None,
+    ) -> dict[str, Any]:
+        return await self._request(
+            "POST",
+            f"/memories/{memory_id}/supersede",
+            json={
+                "participant_id": participant_id,
+                "superseding_memory_id": superseding_memory_id,
+                "reason": reason,
+            },
+            token=token,
+        )
+
+    async def dispute_memory(
+        self,
+        memory_id: int,
+        participant_id: int,
+        conflicting_memory_id: int | None,
+        reason: str,
+        token: str | None = None,
+    ) -> dict[str, Any]:
+        return await self._request(
+            "POST",
+            f"/memories/{memory_id}/dispute",
+            json={
+                "participant_id": participant_id,
+                "conflicting_memory_id": conflicting_memory_id,
+                "reason": reason,
+            },
+            token=token,
+        )
+
+    async def project_context(
+        self,
+        participant_id: int,
+        project_id: int | None = None,
+        token: str | None = None,
+    ) -> dict[str, Any]:
+        return await self._request(
+            "GET",
+            "/memories/context",
+            params=_drop_none({"participant_id": participant_id, "project_id": project_id}),
+            token=token,
         )
 
 

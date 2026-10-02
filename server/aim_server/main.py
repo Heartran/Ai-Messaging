@@ -21,6 +21,7 @@ from importlib import resources
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from pydantic import ValidationError
 
 from . import __version__
 from .db import (
@@ -35,6 +36,21 @@ from .db import (
     purge_old_messages,
     token_matches,
 )
+from .memory_models import (
+    DisputeMemoryBody,
+    DisputeMemoryRequest,
+    MemoryResponse,
+    MemoryStatus,
+    MemoryType,
+    SearchMemoriesRequest,
+    StoreMemoryBody,
+    StoreMemoryRequest,
+    SupersedeMemoryBody,
+    SupersedeMemoryRequest,
+    UpdateMemoryBody,
+    UpdateMemoryRequest,
+)
+from .memory_store import MemoryConflict, MemoryRefused, MemoryNotFound, MemoryStore
 from .models import (
     CreateChatRequest,
     DeleteChatRequest,
@@ -67,6 +83,7 @@ FRAMING = (
 
 # Explicit sentinel on emptiness (§8.1): distinguishable from a failed call.
 EMPTY_NOTICE = "No messages to display."
+EMPTY_MEMORIES_NOTICE = "No memories match."
 
 INTRODUCE_NEXT_STEP = (
     "Introduce yourself in this chat now: send an introduction (not a plain "
@@ -1600,5 +1617,236 @@ def _build_router(operator_key: str | None = None):
             "framing": FRAMING,
             "notice": None if chats else "This participant follows no chats.",
         }
+
+        # --------------------------------------------------------------- memory
+    #
+    # The Memory Layer (Issue #11): facts, decisions, context and derived
+    # knowledge stored as structured memories with provenance, instead of
+    # replaying chat history. Every call is identified (§4.8): writes
+    # record their author, and reads touch presence like the inbox does.
+    # Memory content is agent-written, so reads carry the framing (§2.3).
+
+    def memory_payload(memory: MemoryResponse) -> dict:
+        return memory.model_dump(mode="json")
+
+    def memory_refused(exc: MemoryRefused) -> HTTPException:
+        """Translate a store refusal into the status its cause deserves."""
+        if isinstance(exc, MemoryNotFound):
+            return HTTPException(
+                status_code=404,
+                detail={
+                    "code": "unknown_memory",
+                    "memory_id": exc.memory_id,
+                    "message": f"{exc}. Use the memory search to discover "
+                    "existing memories; IDs are never reused.",
+                },
+            )
+        if isinstance(exc, MemoryConflict):
+            return HTTPException(
+                status_code=409,
+                detail={"code": "memory_conflict", "message": str(exc)},
+            )
+        return HTTPException(status_code=422, detail=str(exc))
+
+    def require_message(conn: sqlite3.Connection, message_id: int) -> None:
+        if conn.execute(
+            "SELECT 1 FROM messages WHERE id = ?", (message_id,)
+        ).fetchone() is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"source_message_id {message_id} is not a message on "
+                "this server (it may have been purged by retention or "
+                "deleted with its chat). Store the memory without it, or "
+                "with the ID of an existing message.",
+            )
+
+    @router.post("/memories", status_code=201)
+    def store_memory(
+        body: StoreMemoryBody,
+        conn: sqlite3.Connection = Depends(_get_conn),
+        x_aim_token: str | None = Header(default=None, alias="X-AIM-Token"),
+    ):
+        """Store a memory. The caller becomes its creator (provenance)."""
+        creator = require_caller(conn, body.participant_id, x_aim_token)
+        touch(conn, creator["id"])
+        if body.source_message_id is not None:
+            require_message(conn, body.source_message_id)
+        request = StoreMemoryRequest(**body.model_dump(exclude={"participant_id"}))
+        memory = MemoryStore(conn).store_memory(request, creator_id=creator["id"])
+        return memory_payload(memory)
+
+    @router.get("/memories")
+    def search_memories(
+        participant_id: int = Query(description="The requesting participant."),
+        query: str | None = Query(
+            default=None,
+            min_length=1,
+            max_length=500,
+            description="Only memories whose content contains this substring "
+            "(a literal: % and _ are not wildcards).",
+        ),
+        memory_type: list[MemoryType] | None = Query(
+            default=None,
+            description="Only these classifications (repeat the parameter).",
+        ),
+        tag: list[str] | None = Query(
+            default=None,
+            description="Only memories carrying ALL of these tags (repeat the "
+            "parameter). Tags are normalized like on store.",
+        ),
+        project_id: int | None = Query(default=None),
+        status: MemoryStatus | None = Query(
+            default=None,
+            description="Default: ACTIVE and DISPUTED. An explicit status "
+            "replaces that default, so SUPERSEDED and ARCHIVED history "
+            "stays reachable.",
+        ),
+        min_confidence: float = Query(default=0.0, ge=0.0, le=1.0),
+        limit: int = Query(default=20, ge=1, le=100),
+        offset: int = Query(default=0, ge=0),
+        conn: sqlite3.Connection = Depends(_get_conn),
+        x_aim_token: str | None = Header(default=None, alias="X-AIM-Token"),
+    ):
+        """Search memories, newest first; `total_results` counts every match."""
+        require_caller(conn, participant_id, x_aim_token)
+        touch(conn, participant_id)
+        try:
+            request = SearchMemoriesRequest(
+                query=query,
+                memory_types=memory_type,
+                tags=tag,
+                project_id=project_id,
+                status=status,
+                min_confidence=min_confidence,
+                limit=limit,
+                offset=offset,
+            )
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        total, memories = MemoryStore(conn).search_memories(request)
+        return {
+            "query": query,
+            "total_results": total,
+            "count": len(memories),
+            "memories": [memory_payload(memory) for memory in memories],
+            "framing": FRAMING,
+            "notice": None if memories else EMPTY_MEMORIES_NOTICE,
+        }
+
+    # Declared before /memories/{memory_id}: a literal path must not be
+    # swallowed by the integer parameter.
+    @router.get("/memories/context")
+    def project_context(
+        participant_id: int = Query(description="The requesting participant."),
+        project_id: int | None = Query(
+            default=None,
+            description="Project scope. Omit for the unscoped memories "
+            "(project_id IS NULL), which is a scope of its own, not a wildcard.",
+        ),
+        conn: sqlite3.Connection = Depends(_get_conn),
+        x_aim_token: str | None = Header(default=None, alias="X-AIM-Token"),
+    ):
+        """The compact context: the latest current memories of each type."""
+        require_caller(conn, participant_id, x_aim_token)
+        touch(conn, participant_id)
+        context = MemoryStore(conn).get_project_context(project_id)
+        payload = context.model_dump(mode="json")
+        payload["framing"] = FRAMING
+        payload["notice"] = (
+            None if context.total_memories else EMPTY_MEMORIES_NOTICE
+        )
+        return payload
+
+    @router.get("/memories/{memory_id}")
+    def get_memory(
+        memory_id: int,
+        participant_id: int = Query(description="The requesting participant."),
+        conn: sqlite3.Connection = Depends(_get_conn),
+        x_aim_token: str | None = Header(default=None, alias="X-AIM-Token"),
+    ):
+        require_caller(conn, participant_id, x_aim_token)
+        touch(conn, participant_id)
+        try:
+            memory = MemoryStore(conn).get_memory(memory_id)
+        except MemoryRefused as exc:
+            raise memory_refused(exc) from None
+        payload = memory_payload(memory)
+        payload["framing"] = FRAMING
+        return payload
+
+    @router.patch("/memories/{memory_id}")
+    def update_memory(
+        memory_id: int,
+        body: UpdateMemoryBody,
+        conn: sqlite3.Connection = Depends(_get_conn),
+        x_aim_token: str | None = Header(default=None, alias="X-AIM-Token"),
+    ):
+        """Refine a memory: content, confidence, status, tags or metadata.
+
+        Any identified participant may edit any memory — shared knowledge
+        is corrected by whoever notices, like a chat is deleted by whoever
+        confirms its name — and the edit is never silent: the full memory
+        comes back, with its new updated_at.
+        """
+        caller = require_caller(conn, body.participant_id, x_aim_token)
+        touch(conn, caller["id"])
+        request = UpdateMemoryRequest(
+            memory_id=memory_id, **body.model_dump(exclude={"participant_id"})
+        )
+        try:
+            memory = MemoryStore(conn).update_memory(request)
+        except MemoryRefused as exc:
+            raise memory_refused(exc) from None
+        return memory_payload(memory)
+
+    @router.post("/memories/{memory_id}/supersede")
+    def supersede_memory(
+        memory_id: int,
+        body: SupersedeMemoryBody,
+        conn: sqlite3.Connection = Depends(_get_conn),
+        x_aim_token: str | None = Header(default=None, alias="X-AIM-Token"),
+    ):
+        """Replace the memory in the path with `superseding_memory_id`.
+
+        The old memory is kept as SUPERSEDED with its lineage: history is
+        never lost, only demoted out of the default search.
+        """
+        caller = require_caller(conn, body.participant_id, x_aim_token)
+        touch(conn, caller["id"])
+        request = SupersedeMemoryRequest(
+            superseded_memory_id=memory_id,
+            superseding_memory_id=body.superseding_memory_id,
+            reason=body.reason,
+        )
+        try:
+            superseded, superseding = MemoryStore(conn).supersede_memory(request)
+        except MemoryRefused as exc:
+            raise memory_refused(exc) from None
+        return {
+            "superseded": memory_payload(superseded),
+            "superseding": memory_payload(superseding),
+        }
+
+    @router.post("/memories/{memory_id}/dispute")
+    def dispute_memory(
+        memory_id: int,
+        body: DisputeMemoryBody,
+        conn: sqlite3.Connection = Depends(_get_conn),
+        x_aim_token: str | None = Header(default=None, alias="X-AIM-Token"),
+    ):
+        """Flag a memory as contradicted. It stays in default searches,
+        marked DISPUTED, until someone supersedes or archives it."""
+        caller = require_caller(conn, body.participant_id, x_aim_token)
+        touch(conn, caller["id"])
+        request = DisputeMemoryRequest(
+            memory_id=memory_id,
+            conflicting_memory_id=body.conflicting_memory_id,
+            reason=body.reason,
+        )
+        try:
+            memory = MemoryStore(conn).dispute_memory(request)
+        except MemoryRefused as exc:
+            raise memory_refused(exc) from None
+        return memory_payload(memory)
 
     return router

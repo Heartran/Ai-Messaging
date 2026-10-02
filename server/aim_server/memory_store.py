@@ -39,6 +39,21 @@ _LIKE_ESCAPE = "\\"
 SUMMARY_SNIPPET_CHARS = 100
 
 
+class MemoryRefused(ValueError):
+    """A memory operation was refused. Subclasses say why, so the HTTP layer
+    can answer with the right status instead of guessing from prose."""
+
+
+class MemoryNotFound(MemoryRefused):
+    def __init__(self, memory_id: int):
+        super().__init__(f"Memory {memory_id} not found")
+        self.memory_id = memory_id
+
+
+class MemoryConflict(MemoryRefused):
+    """The memories exist but the operation makes no sense on them."""
+
+
 def _like_pattern(query: str) -> str:
     """A substring pattern in which `%`, `_` and the escape char are literal."""
     escaped = (
@@ -110,7 +125,7 @@ class MemoryStore:
         """Update an existing memory's properties.
 
         Fields left as None are untouched; `tags` and `metadata`, when given,
-        replace the whole set. Raises ValueError if the memory does not exist.
+        replace the whole set. Raises MemoryNotFound if the memory does not exist.
         """
         assignments: list[str] = []
         params: list = []
@@ -150,7 +165,7 @@ class MemoryStore:
         """Mark one memory as superseded by another.
 
         Records the lineage and flips the old memory to SUPERSEDED. Refused
-        (ValueError) when either memory is missing, when the two are the same
+        (MemoryNotFound / MemoryConflict) when either memory is missing, when the two are the same
         memory, when the old one is already superseded — a memory has one
         successor, so `superseded_by` is never ambiguous — or when the new one
         is itself SUPERSEDED or ARCHIVED, since a dead memory cannot replace
@@ -162,17 +177,17 @@ class MemoryStore:
         old_id = request.superseded_memory_id
         new_id = request.superseding_memory_id
         if old_id == new_id:
-            raise ValueError(f"Memory {old_id} cannot supersede itself")
+            raise MemoryConflict(f"Memory {old_id} cannot supersede itself")
         with self.conn:
             old = self._require(old_id)
             new = self._require(new_id)
             if old["status"] == MemoryStatus.SUPERSEDED.value:
-                raise ValueError(f"Memory {old_id} is already superseded")
+                raise MemoryConflict(f"Memory {old_id} is already superseded")
             if new["status"] in (
                 MemoryStatus.SUPERSEDED.value,
                 MemoryStatus.ARCHIVED.value,
             ):
-                raise ValueError(
+                raise MemoryConflict(
                     f"Memory {new_id} is {new['status']} and cannot supersede another"
                 )
             now = now_utc()
@@ -194,11 +209,12 @@ class MemoryStore:
 
         Records the dispute and sets the memory's status to DISPUTED so it is
         still returned by default searches but visibly needs resolution.
-        Raises ValueError when the memory, or the conflicting memory if one
-        is named, does not exist, or when a memory is disputed with itself.
+        Raises MemoryNotFound when the memory, or the conflicting memory if
+        one is named, does not exist; MemoryConflict when a memory is
+        disputed with itself.
         """
         if request.conflicting_memory_id == request.memory_id:
-            raise ValueError(f"Memory {request.memory_id} cannot conflict with itself")
+            raise MemoryConflict(f"Memory {request.memory_id} cannot conflict with itself")
         with self.conn:
             self._require(request.memory_id)
             if request.conflicting_memory_id is not None:
@@ -317,15 +333,19 @@ class MemoryStore:
             last_updated=now_utc(),
         )
 
+    def get_memory(self, memory_id: int) -> MemoryResponse:
+        """One memory with its tags and lineage, or MemoryNotFound."""
+        return self._fetch_memory(memory_id)
+
     # ----------------------------------------------------------- internals
 
     def _require(self, memory_id: int) -> sqlite3.Row:
-        """The memory's row, or ValueError if there is no such memory."""
+        """The memory's row, or MemoryNotFound."""
         row = self.conn.execute(
             "SELECT * FROM memories WHERE id = ?", (memory_id,)
         ).fetchone()
         if row is None:
-            raise ValueError(f"Memory {memory_id} not found")
+            raise MemoryNotFound(memory_id)
         return row
 
     def _write_tags(self, memory_id: int, tags: Iterable[str]) -> None:
@@ -338,7 +358,7 @@ class MemoryStore:
         """Fetch a single memory by ID with all relationships."""
         found = self._fetch_memories([memory_id])
         if not found:
-            raise ValueError(f"Memory {memory_id} not found")
+            raise MemoryNotFound(memory_id)
         return found[0]
 
     def _fetch_memories(self, ids: list[int]) -> list[MemoryResponse]:
@@ -385,6 +405,7 @@ class MemoryStore:
                 tags=tags.get(row["id"], []),
                 source_message_id=row["source_message_id"],
                 project_id=row["project_id"],
+                creator_id=row["creator_id"],
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
                 superseded_by=superseded_by.get(row["id"]),

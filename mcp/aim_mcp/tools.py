@@ -580,3 +580,159 @@ class AimTools:
         for participant in response["participants"]:
             participant["is_me"] = participant["id"] == identity.participant_id
         return response
+
+    # -------------------------------------------------------------- memory
+    #
+    # The Memory Layer: structured, provenance-tracked knowledge instead of
+    # chat replay. Every call is identified (the server records the
+    # creator and touches presence); every memory comes back with an
+    # is_mine flag, the counterpart of is_me on messages (§9.1).
+
+    @staticmethod
+    def _mark_mine(payload: Any, pid: int) -> Any:
+        if isinstance(payload, dict):
+            if "memory_id" in payload and "creator_id" in payload:
+                payload["is_mine"] = payload["creator_id"] == pid
+            for value in payload.values():
+                AimTools._mark_mine(value, pid)
+        elif isinstance(payload, list):
+            for value in payload:
+                AimTools._mark_mine(value, pid)
+        return payload
+
+    async def _memory_call(self, client_session_key: str, call) -> dict[str, Any]:
+        """Run `call(pid, token)` as this conversation's identity and mark
+        the memories in its answer."""
+        identity = self.config.identity_for(client_session_key)
+
+        async def attempt() -> dict[str, Any]:
+            pid = identity.require_participant_id()
+            return self._mark_mine(await call(pid, identity.require_token()), pid)
+
+        return await self._identified(identity, attempt)
+
+    async def store_memory(
+        self,
+        client_session_key: str,
+        memory_type: str,
+        content: str,
+        tags: list[str] | None = None,
+        confidence: float | None = None,
+        project_id: int | None = None,
+        source_message_id: int | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return await self._memory_call(
+            client_session_key,
+            lambda pid, token: self.client.store_memory(
+                pid,
+                {
+                    "memory_type": memory_type,
+                    "content": content,
+                    "tags": tags,
+                    "confidence": confidence,
+                    "project_id": project_id,
+                    "source_message_id": source_message_id,
+                    "metadata": metadata,
+                },
+                token=token,
+            ),
+        )
+
+    async def search_memories(
+        self,
+        client_session_key: str,
+        query: str | None = None,
+        memory_types: list[str] | None = None,
+        tags: list[str] | None = None,
+        project_id: int | None = None,
+        status: str | None = None,
+        min_confidence: float | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        return await self._memory_call(
+            client_session_key,
+            lambda pid, token: self.client.search_memories(
+                token=token,
+                participant_id=pid,
+                query=query,
+                memory_type=memory_types or None,
+                tag=tags or None,
+                project_id=project_id,
+                status=status,
+                min_confidence=min_confidence,
+                limit=limit,
+                offset=offset,
+            ),
+        )
+
+    async def get_memory(
+        self, client_session_key: str, memory_id: int
+    ) -> dict[str, Any]:
+        return await self._memory_call(
+            client_session_key,
+            lambda pid, token: self.client.get_memory(memory_id, pid, token=token),
+        )
+
+    async def update_memory(
+        self,
+        client_session_key: str,
+        memory_id: int,
+        content: str | None = None,
+        confidence: float | None = None,
+        status: str | None = None,
+        tags: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return await self._memory_call(
+            client_session_key,
+            lambda pid, token: self.client.update_memory(
+                memory_id,
+                pid,
+                {
+                    "content": content,
+                    "confidence": confidence,
+                    "status": status,
+                    "tags": tags,
+                    "metadata": metadata,
+                },
+                token=token,
+            ),
+        )
+
+    async def supersede_memory(
+        self,
+        client_session_key: str,
+        memory_id: int,
+        superseding_memory_id: int,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        return await self._memory_call(
+            client_session_key,
+            lambda pid, token: self.client.supersede_memory(
+                memory_id, pid, superseding_memory_id, reason, token=token
+            ),
+        )
+
+    async def dispute_memory(
+        self,
+        client_session_key: str,
+        memory_id: int,
+        reason: str,
+        conflicting_memory_id: int | None = None,
+    ) -> dict[str, Any]:
+        return await self._memory_call(
+            client_session_key,
+            lambda pid, token: self.client.dispute_memory(
+                memory_id, pid, conflicting_memory_id, reason, token=token
+            ),
+        )
+
+    async def project_context(
+        self, client_session_key: str, project_id: int | None = None
+    ) -> dict[str, Any]:
+        return await self._memory_call(
+            client_session_key,
+            lambda pid, token: self.client.project_context(pid, project_id, token=token),
+        )

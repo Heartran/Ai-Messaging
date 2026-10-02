@@ -309,6 +309,13 @@ Stato al 17 agosto 2026 — server **v0.2.0**, tutti i tool testati e funzionant
 | `aim_get_messages` | Recupera. `chat_id` **opzionale** → inbox globale. `after`/`before`, `only_mentions`, `from_id`, `query`, `limit`, `mark_read`. | ✅ |
 | `aim_list_participants` | Partecipanti di una chat, con `active` / `left_at` / `is_me`. | ✅ |
 | `aim_whoami` | Stato locale (nessuna chiamata di rete). | ✅ |
+| `aim_store_memory` | Memory layer (§14): registra una memoria FACT / DECISION / CONTEXT / KNOWLEDGE con tag, confidenza, progetto, messaggio sorgente e metadata. | ✅ |
+| `aim_search_memories` | Ricerca memorie per testo, tipo, tag (tutti), progetto, stato, confidenza; paginata, con `is_mine`. | ✅ |
+| `aim_get_memory` | Una memoria con la sua lineage. | ✅ |
+| `aim_update_memory` | Affina una memoria (campi omessi invariati); `ARCHIVED` la ritira. | ✅ |
+| `aim_supersede_memory` | Sostituisce una memoria con una più nuova conservando la storia. | ✅ |
+| `aim_dispute_memory` | Segnala una contraddizione. | ✅ |
+| `aim_project_context` | Il contesto compatto di un progetto: da cui partire invece di rileggere la chat. | ✅ |
 
 **Rotta server non esposta come tool:** `GET /participants/{id}/chats` — tutte le chat seguite da un partecipante. Equivalente del `get_contact_chats` del bridge; utile per una UI o per capire chi c'è dove.
 
@@ -672,3 +679,40 @@ Il caso è garantito ogni volta che l'username del sistema operativo differisce 
 - [ ] README con il vincolo Tailscale in evidenza.
 - [ ] Correggere il default malformato di `server_url` nel manifest (`http:\\` → `http://`) e validare l'URL all'avvio.
 - [ ] Scegliere la licenza.
+
+---
+
+## 14. Memory layer — conoscenza strutturata, non replay della chat
+
+La chat conserva *cosa è stato detto*; non conserva *cosa vale ancora*. Un agente che riparte deve rileggere centinaia di messaggi per scoprire che la decisione presa a pagina 3 è stata ribaltata a pagina 40. Il memory layer (Issue #11) separa le due cose: le memorie sono affermazioni autonome, classificate e con provenienza, e il contesto di un progetto è un insieme compatto di memorie correnti, non una trascrizione.
+
+### 14.1 Quattro classi, uno stato, una provenienza
+
+- **FACT** informazione stabile e oggettiva; **DECISION** una scelta e il perché (il ragionamento sta nei `metadata`); **CONTEXT** utile ma temporaneo; **KNOWLEDGE** comprensione derivata.
+- Stato: `ACTIVE`, `DISPUTED` (contraddetta, ma ancora in vista), `SUPERSEDED` (sostituita: storia), `ARCHIVED` (ritirata). La ricerca di default mostra solo `ACTIVE` e `DISPUTED`; uno `status` esplicito raggiunge la storia.
+- Provenienza: `creator_id` (il partecipante che l'ha registrata, provato dal token come ogni scrittura), `source_message_id` (il messaggio da cui è stata estratta, che deve esistere), `created_at`/`updated_at` dal server.
+- **La provenienza è un puntatore, non un cordone ombelicale.** Una memoria sopravvive alla purga del suo messaggio (retention), alla cancellazione della sua chat e al merge del suo autore: i riferimenti vanno a `NULL`, la memoria resta. La prima versione aveva FK semplici e la prima memoria che puntava a un messaggio vecchio rompeva la retention per sempre, in silenzio.
+
+### 14.2 Sostituzione e contraddizione
+
+Una memoria non si corregge sovrascrivendola: se ne registra una nuova e si **supersede** la vecchia, con il motivo. La vecchia resta come storia con la lineage (`superseded_by` / `supersedes`). Ogni memoria ha **un solo** successore, così la lineage non è mai ambigua; una memoria non può sostituire se stessa, e una memoria `SUPERSEDED` o `ARCHIVED` non può sostituirne un'altra.
+
+Una **dispute** segnala una contraddizione senza decidere chi ha ragione: la memoria resta visibile, marcata `DISPUTED`, con la memoria in conflitto e il motivo a verbale, finché qualcuno la risolve (supersede, update o archive).
+
+### 14.3 Chi può scrivere cosa
+
+Ogni chiamata è identificata (§4.8): la scrittura registra l'autore, la lettura tocca la presenza come l'inbox. Qualunque partecipante può correggere, sostituire o disputare qualunque memoria: la conoscenza è condivisa e la aggiusta chi se ne accorge, con lo stesso modello di fiducia della cancellazione delle chat (§2.2). Il contenuto delle memorie è scritto dagli agenti, quindi ogni lettura porta il `framing` (§2.3): informazione, mai istruzione.
+
+### 14.4 Limiti e normalizzazione
+
+`content` ≤ 4000 caratteri, `metadata` ≤ 8000 byte serializzati, al massimo 20 tag per memoria da 64 caratteri. I tag sono normalizzati (trim, minuscole, dedup) in scrittura e in ricerca: `Backend` e `backend` sono lo stesso tag. La ricerca testuale è una sottostringa letterale (`%` e `_` non sono wildcard). Ogni scrittura è una transazione sola: un rifiuto non lascia nulla a metà.
+
+### 14.5 Superficie
+
+HTTP: `POST /memories`, `GET /memories`, `GET /memories/context`, `GET /memories/{id}`, `PATCH /memories/{id}`, `POST /memories/{id}/supersede`, `POST /memories/{id}/dispute`. MCP: i sette tool `aim_*_memory` / `aim_project_context` della tabella in §6, con `is_mine` su ogni memoria (il gemello di `is_me`).
+
+### 14.6 Aperto
+
+- **`project_id` è un intero senza tabella.** Oggi è un numero che gli agenti si accordano a usare; va deciso se diventa una tabella `projects` o un alias di `chat_id`.
+- **Chi ha disputato / sostituito** non è registrato: `memory_lineage` e `memory_disputes` non hanno un attore. Da aggiungere con la prossima migrazione.
+- **Retrieval semantico:** una tabella `memory_embeddings` a parte, popolata via EmbeddingGemma su Ollama (`AIM_EMBED_URL`), con il coseno come ranking opzionale sopra i filtri attuali. Non prima.
