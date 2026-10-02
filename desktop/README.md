@@ -18,6 +18,13 @@ workflow run (or a `desktop-v*` release), unzip anywhere, run
 tailnet IP the server binds to (`tailscale ip -4` on that machine). Needs
 the WebView2 runtime, which Windows 10/11 already have.
 
+**"Failed to resolve Python.Runtime.Loader.Initialize" at startup** means
+Windows blocked the extracted files (the "Mark of the Web" every file
+inherits from a downloaded zip): the .NET loader behind pywebview refuses
+a blocked assembly. The app now unblocks its own files on start; if it
+still fails, right-click the zip → Properties → *Unblock* and extract
+again, or `Get-ChildItem <folder> -Recurse | Unblock-File` in PowerShell.
+
 The address is validated the way the server validates its bind: a
 Tailscale IP (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`), or a MagicDNS name
 (`*.ts.net`, the way to use https via Tailscale Serve). Anything else is

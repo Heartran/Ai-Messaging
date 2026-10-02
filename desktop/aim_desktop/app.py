@@ -14,6 +14,7 @@ from __future__ import annotations
 import html
 import logging
 import os
+import sys
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -23,6 +24,7 @@ from .bridge import DesktopBridge
 from .config import ConfigError, DesktopConfig, resolve_server_url
 from .notify import make_notifier
 from .tray import ASSETS, Tray
+from .unblock import bundle_root, unblock_tree
 
 log = logging.getLogger("aim_desktop.app")
 
@@ -49,6 +51,21 @@ def setup_html(current: str | None = None, error: str | None = None) -> str:
         .replace("__ERROR__", html.escape(error or ""))
         .replace("__VERSION__", html.escape(__version__))
     )
+
+
+def startup_failure_text(reason: str, log_path: Path) -> str:
+    text = f"AI Messaging could not start.\n\n{reason}\n\n"
+    if "Python.Runtime" in reason or "Loader.Initialize" in reason:
+        text += (
+            "This is usually Windows blocking files that came from a downloaded zip "
+            "(the \"Mark of the Web\"). Right-click the zip, Properties, tick Unblock, "
+            "and extract it again — or run in PowerShell:\n"
+            "    Get-ChildItem <folder> -Recurse | Unblock-File\n\n"
+            "It also needs the .NET Framework 4.7.2+ and the WebView2 runtime, "
+            "both part of Windows 10/11.\n\n"
+        )
+    text += f"Details are in {log_path}"
+    return text
 
 
 class DesktopApp:
@@ -157,7 +174,14 @@ class DesktopApp:
         return None, setup_html(self.server_url, self.startup_error)
 
     def run(self) -> int:
-        import webview  # pylint: disable=import-error  # wants a display at import time
+        if sys.platform == "win32":
+            # A zip extracted by Explorer leaves every file "blocked"; the .NET
+            # loader behind pywebview then refuses its own runtime DLL.
+            unblock_tree(bundle_root())
+        try:
+            import webview  # pylint: disable=import-error  # wants a display at import time
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            return self._fail_to_start(f"The window toolkit could not be loaded: {exc}")
 
         storage = self.config_file.parent / "webview-data"
         storage.mkdir(parents=True, exist_ok=True)
@@ -173,9 +197,28 @@ class DesktopApp:
         # private_mode=False + storage_path: the page keeps its identity, read
         # checkpoints and settings in localStorage (§3) — they must survive a
         # restart exactly as they do in a browser profile.
-        webview.start(
-            self.on_started, private_mode=False, storage_path=str(storage),
-            debug=self.debug, icon=str(ASSETS / "icon.png"),
-        )
-        self.tray.stop()
+        try:
+            webview.start(
+                self.on_started, private_mode=False, storage_path=str(storage),
+                debug=self.debug, icon=str(ASSETS / "icon.png"),
+            )
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            return self._fail_to_start(f"The window could not be created: {exc}")
+        finally:
+            self.tray.stop()
         return 0
+
+    def _fail_to_start(self, reason: str) -> int:
+        """A windowed executable has nowhere to print: log it and, on Windows,
+        say it in a message box with the one fix that usually applies."""
+        log.exception("startup failed: %s", reason)
+        text = startup_failure_text(reason, self.config_file.parent / "desktop.log")
+        if sys.platform == "win32":
+            try:
+                import ctypes
+
+                ctypes.windll.user32.MessageBoxW(None, text, WINDOW_TITLE, 0x10)  # MB_ICONERROR
+            except Exception:  # pylint: disable=broad-exception-caught
+                pass
+        print(text, file=sys.stderr)
+        return 1

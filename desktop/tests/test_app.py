@@ -168,3 +168,12 @@ def test_assets_are_packaged():
     assert (ASSETS / "icon.png").exists()
     assert (ASSETS / "icon.ico").exists()
     assert (ASSETS / "setup.html").exists()
+
+
+def test_startup_failure_text_names_the_usual_cause(tmp_path):
+    from aim_desktop.app import startup_failure_text
+    text = startup_failure_text("Failed to resolve Python.Runtime.Loader.Initialize from x", tmp_path / "desktop.log")
+    assert "Unblock" in text and "Unblock-File" in text
+    assert str(tmp_path / "desktop.log") in text
+    plain = startup_failure_text("something else", tmp_path / "desktop.log")
+    assert "Unblock" not in plain and "something else" in plain
