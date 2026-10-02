@@ -22,7 +22,7 @@ aim-mcp = "aim_mcp.__main__:run"
 [project.optional-dependencies]
 dev = [
     "pytest>=8",
-    "anyio>=4",
+    "anyio>=4.5",  # what mcp 1.14 itself needs; the lower-bounds job installs this exact floor
 ]
 
 [tool.hatch.build.targets.wheel]

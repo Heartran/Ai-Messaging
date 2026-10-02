@@ -25,7 +25,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anyio", marker = "extra == 'dev'", specifier = ">=4" },
+    { name = "anyio", marker = "extra == 'dev'", specifier = ">=4.5" },
     { name = "httpx", specifier = ">=0.27.1" },
     { name = "mcp", specifier = ">=1.14" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
