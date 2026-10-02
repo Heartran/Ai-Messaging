@@ -531,6 +531,24 @@ Il polling diceva alla pagina cosa c'era di nuovo; **nessuno lo diceva alla pers
 
 Registro, segnalibri e preferenze vivono nel browser (localStorage), come tutto il resto della UI: il server non sa chi è stato avvisato di cosa.
 
+### 10.9 App desktop per Windows
+
+La §10.8 finisce con un'ammissione: su `http://100.x.x.x` la maggior parte dei browser **non mostra notifiche**, e la via d'uscita (https dentro la tailnet) sposta il problema invece di risolverlo per la macchina davanti a cui si sta seduti. Campanella e titolo della scheda funzionano solo se la scheda è visibile da qualche parte — una notifica che va cercata non è una notifica.
+
+La risposta **non è una seconda UI**. Riscrivere 3.500 righe di client in un altro linguaggio significherebbe due transcript da tenere allineati, due renderer Markdown da proteggere (§10.7), due posti in cui la §2.3 può essere tradita. L'app desktop (`desktop/`) è un **processo che ospita la stessa pagina** — un WebView2 nativo (pywebview) che carica `/ui` dal server — e aggiunge solo ciò che un browser su quell'origine non può dare:
+
+- **Notifiche native di Windows** (toast WinRT), con un click che riporta la finestra davanti e apre il messaggio. Nessun permesso da chiedere, nessun https.
+- **Icona nella tray con badge** dei non letti, speculare alla campanella.
+- **La X nasconde nella tray** e la pagina continua a guardare — con la lettura rilassata ogni 30 s che la §10.8 già concede a una scheda nascosta; *Quit* sta nel menu della tray. Nell'app, notifiche e controllo in background sono **attivi di default**: sono il motivo per cui esiste.
+
+Il contratto pagina ↔ host è minimo e in chiaro. L'app apre `/ui?desktop=<versione>`: la pagina ne deduce di essere ospitata, e in tre punti — e solo in quelli — usa il ponte `window.pywebview.api` invece del browser: `notify` al posto di `Notification`, `set_badge` accanto al badge della campanella, `info` perché le impostazioni dicano quale backend c'è davvero (uno switch che non fa niente è peggio di uno disabilitato). Al click sul toast l'host richiama `window.aimDesktopOpen(chat_id, message_id)`: **due interi assegnati dal server**, mai una stringa — niente di scritto da un partecipante attraversa il confine verso uno script (§2.3). Un test (`desktop/tests/test_ui_contract.py`) inchioda questo contratto contro il file `ui.html`, così una modifica da una parte sola fallisce lì e non nella tray di qualcuno.
+
+Vale la §2.1 anche in uscita: l'app **rifiuta di collegarsi fuori dalla tailnet**. L'indirizzo del server è validato come il bind del server stesso — IP Tailscale, oppure nome MagicDNS `*.ts.net` (l'unico modo per l'https via Tailscale Serve); loopback solo con `AIM_ALLOW_LOOPBACK=1`. Un indirizzo sbagliato diventa la pagina di configurazione con il motivo, mai una morte silenziosa: un eseguibile a finestra non ha uno stderr che qualcuno legga, quindi tutto finisce anche in `desktop.log` accanto alla configurazione.
+
+Stato e profilo del browser (identità, checkpoint, impostazioni della pagina) vivono nel profilo WebView2 dell'app, nei dati dell'utente — persistono tra un avvio e l'altro esattamente come in un browser (§3). Il server non sa nemmeno che esiste un'app: per lui è un browser in più.
+
+Il binario è un prodotto di CI, non della macchina di qualcuno: la workflow `desktop.yml` lo costruisce con PyInstaller su `windows-latest` (i moduli WinRT esistono solo lì) e pubblica lo zip come artefatto, o come release sui tag `desktop-v*`. Nessun dettaglio dell'installazione entra nel pacchetto (§12.1): l'indirizzo del server lo chiede al primo avvio.
+
 ---
 
 ## 11. Correzione a mano dei metadati

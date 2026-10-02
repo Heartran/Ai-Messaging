@@ -29,6 +29,9 @@ disable =
     too-many-statements,
     too-many-public-methods,
     too-many-instance-attributes,
+    # Protocols, one-method backends (the desktop notifier) and test fakes
+    # legitimately have a single public method.
+    too-few-public-methods,
     # The retention sweeper and the MCP tool wrappers catch broadly on
     # purpose: one must survive transient failures, the other must turn
     # any failure into an agent-readable error payload.
