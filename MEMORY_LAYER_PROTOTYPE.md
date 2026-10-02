@@ -1,7 +1,7 @@
 # Memory Layer Prototype - Issue #11
 
-**Status:** Working Prototype - Classification & Storage
-**Date:** 2026-09-18
+**Status:** Working Prototype - Classification & Storage (storage layer only: no HTTP endpoints or MCP tools yet)
+**Date:** 2026-09-18, revised 2026-10-02
 
 ## Overview
 
@@ -95,8 +95,8 @@ Retrieve 10-20 relevant memories instead of entire chat history:
 
 ```python
 context = store.get_project_context(project_id=1)
-# Returns:
-# - Top 5 decisions (by recency + confidence)
+# Returns, newest first, ACTIVE and DISPUTED only:
+# - Top 5 decisions
 # - Top 5 facts (stable information)
 # - Top 5 context items (current work)
 # - Top 5 knowledge items (patterns learned)
@@ -124,7 +124,7 @@ search = SearchMemoriesRequest(
 search = SearchMemoriesRequest(tags=["backend", "database"])
 ```
 
-**By Text (Full-text):**
+**By Text (literal substring; `%` and `_` are not wildcards):**
 ```python
 search = SearchMemoriesRequest(query="PostgreSQL")
 ```
@@ -149,20 +149,21 @@ search = SearchMemoriesRequest(min_confidence=0.90)
 - `content` - Text content (up to 4000 chars)
 - `status` - ACTIVE, SUPERSEDED, ARCHIVED, DISPUTED
 - `confidence` - 0.0-1.0 belief level
-- `source_message_id` - Reference to original AIM message
+- `source_message_id` - Reference to original AIM message (set to NULL when the message is purged or its chat deleted)
 - `project_id` - Optional project scope
-- `creator_id` - Agent who created this memory
+- `creator_id` - Agent who created this memory (set to NULL when the participant is merged away)
 - `metadata` - JSON for custom fields
 - `created_at` / `updated_at` - Timestamps
 
 **memory_lineage**
 - Tracks supersession relationships
-- `superseded_id` → `superseding_id` mapping
+- `superseded_id` → `superseding_id` mapping (one successor per memory)
 - Includes `reason` for evolution explanation
 
 **memory_tags**
-- For efficient semantic search
-- Tag-based filtering (supports compound tags)
+- For efficient tag search
+- Tags are trimmed, lower-cased and de-duplicated on write; at most 20 per memory, 64 characters each
+- Tag-based filtering (all requested tags must be present)
 
 **memory_disputes**
 - Records contradictions between memories
@@ -180,8 +181,8 @@ content: str
 source_message_id: Optional[int]
 project_id: Optional[int]
 confidence: float = 0.95
-tags: list[str] = []
-metadata: dict = {}
+tags: list[str] = []          # normalized; max 20
+metadata: dict = {}           # max 8000 bytes serialized
 ```
 
 **SearchMemoriesRequest**
@@ -193,12 +194,13 @@ project_id: Optional[int]
 status: Optional[MemoryStatus]
 min_confidence: float = 0.0
 limit: int = 20
+offset: int = 0               # page through total_results
 ```
 
 **SupersedeMemoryRequest**
 ```python
 superseded_memory_id: int
-supersiding_memory_id: int
+superseding_memory_id: int
 reason: Optional[str]
 ```
 
@@ -260,21 +262,21 @@ Output shows:
 
 ```
 server/
-├── memory_models.py          # Pydantic models for API
-├── memory_store.py           # Service layer (store, search, update)
-├── demo_memory_layer.py      # Runnable prototype demo
-└── aim_server/
-    └── db.py                 # (Modified) Added migration + schema
+├── demo_memory_layer.py              # Runnable prototype demo (not packaged)
+├── aim_server/
+│   ├── memory_models.py              # Pydantic models for API
+│   ├── memory_store.py               # Service layer (store, search, update)
+│   └── db.py                         # (Modified) Memory Layer schema + v5 migration
+└── tests/
+    └── test_memory_store.py          # Store contract, atomicity, schema behaviour
 ```
 
-## Code Statistics
-
-- **memory_models.py**: 180 lines - All API request/response models
-- **memory_store.py**: 440 lines - Core CRUD and search operations
-- **demo_memory_layer.py**: 260 lines - Working demonstration
-- **db.py**: Added 130 lines for Memory Layer schema + migration
-
 ## Design Decisions
+
+### 0. Every write is one transaction
+- `store`, `update`, `supersede` and `dispute` each run inside a single transaction
+- A validation or constraint failure rolls everything back and leaves the connection clean
+- Supersession is validated: both memories must exist, a memory cannot supersede itself, a memory has one successor, and a SUPERSEDED or ARCHIVED memory cannot supersede another
 
 ### 1. Confidence Levels (0.0-1.0)
 - Allows agents to express belief strength
@@ -301,6 +303,7 @@ server/
 - Links memories back to original AIM messages
 - Enables audit trail and verification
 - Not required (agent can create standalone memories)
+- A pointer, not a lifeline: the memory survives the purge of its source message (retention), the deletion of its chat, and the merge of its author. Without `ON DELETE SET NULL` the first memory pointing at an old message made the retention sweep fail forever.
 
 ## Next Steps
 
@@ -327,17 +330,17 @@ server/
 
 ## Testing
 
-Demo covers all major features:
-- ✓ Storing all 4 memory types
-- ✓ Searching by type, tags, text
-- ✓ Supersession workflow
-- ✓ Dispute flagging
-- ✓ Project context extraction
-- ✓ Memory updates
-- ✓ Confidence tracking
-- ✓ Metadata storage
+`server/tests/test_memory_store.py` covers:
+- ✓ Memories surviving the retention purge, chat deletion and participant deletion
+- ✓ Tag normalization and the tag/metadata size limits
+- ✓ Atomicity: a failed write leaves no open transaction and no half-applied status
+- ✓ Supersession validation and lineage
+- ✓ Dispute recording
+- ✓ Search by status, type, project, confidence, tags (all-of), literal text, and paging
+- ✓ Project context, including project 0 and summary truncation
+- ✓ The v4 → v5 rebuild of the memories table
 
-No unit tests written yet (prototype stage).
+The demo script exercises the same features end to end.
 
 ## Performance Considerations
 
@@ -347,11 +350,12 @@ Current implementation uses SQLite with indexes on:
 - `(created_at DESC)` - Chronological ordering
 - Tags table - Efficient compound tag search
 
+Reads are batched: a search page costs three queries however many memories it returns.
+
 For production:
 - Consider PostgreSQL for concurrency
 - Add full-text search (FTS5)
 - Implement caching layer for hot memories
-- Add pagination for large result sets
 
 ## Security
 
@@ -372,7 +376,7 @@ For production, add:
 - **Python**: 3.10+
 - **Database**: SQLite 3.40+
 - **Dependencies**: Pydantic, sqlite3 (stdlib)
-- **Schema Version**: 4 (from 3)
+- **Schema Version**: 5 (from 3; a v4 database created from an earlier revision of this branch is rebuilt in place)
 - **Backward Compatibility**: Yes (migration path provided)
 
 ## References

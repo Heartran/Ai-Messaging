@@ -1,14 +1,20 @@
 """Memory Store service layer - operations for the Memory Layer.
 
-Implements CRUD operations and semantic search for memories with full
-provenance tracking, supersession, and dispute handling.
+Implements CRUD operations and search for memories with provenance tracking,
+supersession, and dispute handling.
+
+Every write is one transaction (`with self.conn:`): a validation or
+constraint failure rolls everything back and leaves the connection clean.
+The alternative — statements executed one by one and committed at the end —
+left a half-applied status change in an open transaction that the next
+unrelated write would commit.
 """
 
 from __future__ import annotations
 
 import json
 import sqlite3
-from typing import Optional
+from typing import Iterable, Optional
 
 from aim_server.db import now_utc
 from aim_server.memory_models import (
@@ -23,32 +29,58 @@ from aim_server.memory_models import (
     ProjectContextResponse,
 )
 
+# What a default search and the project context consider "current".
+CURRENT_STATUSES = (MemoryStatus.ACTIVE.value, MemoryStatus.DISPUTED.value)
+_CURRENT_SQL = "status IN ('ACTIVE', 'DISPUTED')"
+
+# Characters that mean something to LIKE and must be escaped in a user query.
+_LIKE_ESCAPE = "\\"
+
+SUMMARY_SNIPPET_CHARS = 100
+
+
+def _like_pattern(query: str) -> str:
+    """A substring pattern in which `%`, `_` and the escape char are literal."""
+    escaped = (
+        query.replace(_LIKE_ESCAPE, _LIKE_ESCAPE * 2)
+        .replace("%", _LIKE_ESCAPE + "%")
+        .replace("_", _LIKE_ESCAPE + "_")
+    )
+    return f"%{escaped}%"
+
+
+def _scope_clause(project_id: Optional[int]) -> tuple[str, tuple]:
+    """SQL for one project scope. `None` is the unscoped bucket, not a wildcard."""
+    if project_id is None:
+        return "project_id IS NULL", ()
+    return "project_id = ?", (project_id,)
+
 
 class MemoryStore:
     """Service for managing memories with provenance and semantic relationships."""
 
     def __init__(self, conn: sqlite3.Connection):
-        """Initialize with database connection."""
+        """Initialize with a database connection opened by `aim_server.db.connect`."""
         self.conn = conn
-        self.conn.row_factory = sqlite3.Row
+
+    # ------------------------------------------------------------- writes
 
     def store_memory(
         self,
         request: StoreMemoryRequest,
-        creator_id: int
+        creator_id: Optional[int],
     ) -> MemoryResponse:
         """Store a new memory with classification and provenance.
 
         Args:
             request: StoreMemoryRequest with memory content and classification
-            creator_id: Participant ID of the agent creating this memory
+            creator_id: Participant ID of the agent creating this memory, or
+                None for a memory with no recorded author
 
         Returns:
             MemoryResponse with the stored memory and its ID
         """
         now = now_utc()
-        metadata_json = json.dumps(request.metadata) if request.metadata else None
-
         with self.conn:
             cursor = self.conn.execute(
                 """
@@ -65,427 +97,350 @@ class MemoryStore:
                     request.source_message_id,
                     request.project_id,
                     creator_id,
-                    metadata_json,
+                    _dump_metadata(request.metadata),
                     now,
                     now,
                 ),
             )
             memory_id = cursor.lastrowid
-
-            # Store unique tags as one transaction with the memory row.
-            for tag in dict.fromkeys(request.tags):
-                self.conn.execute(
-                    "INSERT INTO memory_tags (memory_id, tag) VALUES (?, ?)",
-                    (memory_id, tag),
-                )
+            self._write_tags(memory_id, request.tags)
         return self._fetch_memory(memory_id)
 
-    def update_memory(
-        self,
-        request: UpdateMemoryRequest
-    ) -> MemoryResponse:
+    def update_memory(self, request: UpdateMemoryRequest) -> MemoryResponse:
         """Update an existing memory's properties.
 
-        Args:
-            request: UpdateMemoryRequest with updates to apply
-
-        Returns:
-            Updated MemoryResponse
+        Fields left as None are untouched; `tags` and `metadata`, when given,
+        replace the whole set. Raises ValueError if the memory does not exist.
         """
-        now = now_utc()
-
-        # Build update query dynamically based on provided fields
-        updates = []
-        params = []
-
+        assignments: list[str] = []
+        params: list = []
         if request.content is not None:
-            updates.append("content = ?")
+            assignments.append("content = ?")
             params.append(request.content)
-
         if request.confidence is not None:
-            updates.append("confidence = ?")
+            assignments.append("confidence = ?")
             params.append(request.confidence)
-
         if request.status is not None:
-            updates.append("status = ?")
+            assignments.append("status = ?")
             params.append(request.status.value)
-
-        if not updates and request.tags is None and request.metadata is None:
-            # No updates provided
-            return self._fetch_memory(request.memory_id)
-
-        # Always update the timestamp
-        updates.append("updated_at = ?")
-        params.append(now)
-        params.append(request.memory_id)
-
-        update_sql = f"UPDATE memories SET {', '.join(updates)} WHERE id = ?"
-        self.conn.execute(update_sql, params)
-
-        # Handle tags separately
-        if request.tags is not None:
-            self.conn.execute("DELETE FROM memory_tags WHERE memory_id = ?", (request.memory_id,))
-            for tag in request.tags:
-                self.conn.execute(
-                    "INSERT INTO memory_tags (memory_id, tag) VALUES (?, ?)",
-                    (request.memory_id, tag),
-                )
-
-        # Handle metadata
         if request.metadata is not None:
-            metadata_json = json.dumps(request.metadata) if request.metadata else None
-            self.conn.execute(
-                "UPDATE memories SET metadata = ? WHERE id = ?",
-                (metadata_json, request.memory_id),
-            )
+            assignments.append("metadata = ?")
+            params.append(_dump_metadata(request.metadata))
 
-        self.conn.commit()
+        with self.conn:
+            self._require(request.memory_id)
+            if not assignments and request.tags is None:
+                return self._fetch_memory(request.memory_id)  # nothing to change
+            assignments.append("updated_at = ?")
+            params.append(now_utc())
+            params.append(request.memory_id)
+            self.conn.execute(
+                f"UPDATE memories SET {', '.join(assignments)} WHERE id = ?", params
+            )
+            if request.tags is not None:
+                self.conn.execute(
+                    "DELETE FROM memory_tags WHERE memory_id = ?", (request.memory_id,)
+                )
+                self._write_tags(request.memory_id, request.tags)
         return self._fetch_memory(request.memory_id)
 
     def supersede_memory(
-        self,
-        request: SupersedeMemoryRequest
+        self, request: SupersedeMemoryRequest
     ) -> tuple[MemoryResponse, MemoryResponse]:
         """Mark one memory as superseded by another.
 
-        Creates a lineage relationship and updates statuses to reflect
-        the supersession (evolution, contradiction resolution, etc).
-
-        Args:
-            request: SupersedeMemoryRequest
+        Records the lineage and flips the old memory to SUPERSEDED. Refused
+        (ValueError) when either memory is missing, when the two are the same
+        memory, when the old one is already superseded — a memory has one
+        successor, so `superseded_by` is never ambiguous — or when the new one
+        is itself SUPERSEDED or ARCHIVED, since a dead memory cannot replace
+        a live one.
 
         Returns:
             Tuple of (superseded_memory, superseding_memory)
         """
-        now = now_utc()
+        old_id = request.superseded_memory_id
+        new_id = request.superseding_memory_id
+        if old_id == new_id:
+            raise ValueError(f"Memory {old_id} cannot supersede itself")
+        with self.conn:
+            old = self._require(old_id)
+            new = self._require(new_id)
+            if old["status"] == MemoryStatus.SUPERSEDED.value:
+                raise ValueError(f"Memory {old_id} is already superseded")
+            if new["status"] in (
+                MemoryStatus.SUPERSEDED.value,
+                MemoryStatus.ARCHIVED.value,
+            ):
+                raise ValueError(
+                    f"Memory {new_id} is {new['status']} and cannot supersede another"
+                )
+            now = now_utc()
+            self.conn.execute(
+                "UPDATE memories SET status = ?, updated_at = ? WHERE id = ?",
+                (MemoryStatus.SUPERSEDED.value, now, old_id),
+            )
+            self.conn.execute(
+                """
+                INSERT INTO memory_lineage (superseded_id, superseding_id, reason, recorded_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (old_id, new_id, request.reason, now),
+            )
+        return self._fetch_memory(old_id), self._fetch_memory(new_id)
 
-        # Mark the old memory as superseded
-        self.conn.execute(
-            "UPDATE memories SET status = ? WHERE id = ?",
-            (MemoryStatus.SUPERSEDED.value, request.superseded_memory_id),
-        )
-
-        # Record the lineage relationship
-        self.conn.execute(
-            """
-            INSERT INTO memory_lineage (superseded_id, superseding_id, reason, recorded_at)
-            VALUES (?, ?, ?, ?)
-            """,
-            (
-                request.superseded_memory_id,
-                request.superseding_memory_id,
-                request.reason,
-                now,
-            ),
-        )
-
-        self.conn.commit()
-
-        return (
-            self._fetch_memory(request.superseded_memory_id),
-            self._fetch_memory(request.superseding_memory_id),
-        )
-
-    def dispute_memory(
-        self,
-        request: DisputeMemoryRequest
-    ) -> MemoryResponse:
+    def dispute_memory(self, request: DisputeMemoryRequest) -> MemoryResponse:
         """Flag a memory as disputed or contradictory.
 
-        Records the dispute without changing the original memory's status;
-        instead marks it as DISPUTED so it can be investigated and resolved.
-
-        Args:
-            request: DisputeMemoryRequest
-
-        Returns:
-            Updated MemoryResponse with DISPUTED status
+        Records the dispute and sets the memory's status to DISPUTED so it is
+        still returned by default searches but visibly needs resolution.
+        Raises ValueError when the memory, or the conflicting memory if one
+        is named, does not exist, or when a memory is disputed with itself.
         """
-        now = now_utc()
-
-        # Mark memory as disputed
-        self.conn.execute(
-            "UPDATE memories SET status = ? WHERE id = ?",
-            (MemoryStatus.DISPUTED.value, request.memory_id),
-        )
-
-        # Record the dispute
-        self.conn.execute(
-            """
-            INSERT INTO memory_disputes (memory_id, conflicting_id, reason, created_at)
-            VALUES (?, ?, ?, ?)
-            """,
-            (
-                request.memory_id,
-                request.conflicting_memory_id,
-                request.reason,
-                now,
-            ),
-        )
-
-        self.conn.commit()
+        if request.conflicting_memory_id == request.memory_id:
+            raise ValueError(f"Memory {request.memory_id} cannot conflict with itself")
+        with self.conn:
+            self._require(request.memory_id)
+            if request.conflicting_memory_id is not None:
+                self._require(request.conflicting_memory_id)
+            now = now_utc()
+            self.conn.execute(
+                "UPDATE memories SET status = ?, updated_at = ? WHERE id = ?",
+                (MemoryStatus.DISPUTED.value, now, request.memory_id),
+            )
+            self.conn.execute(
+                """
+                INSERT INTO memory_disputes (memory_id, conflicting_id, reason, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (request.memory_id, request.conflicting_memory_id, request.reason, now),
+            )
         return self._fetch_memory(request.memory_id)
 
+    # -------------------------------------------------------------- reads
+
     def search_memories(
-        self,
-        request: SearchMemoriesRequest
+        self, request: SearchMemoriesRequest
     ) -> tuple[int, list[MemoryResponse]]:
         """Search for memories by type, tags, text, or project.
 
-        Implements the selective semantic retrieval pattern: returns a compact,
-        relevant context instead of all memories.
-
-        Args:
-            request: SearchMemoriesRequest with search criteria
-
-        Returns:
-            Tuple of (total_count, results)
+        Returns a compact, relevant page instead of all memories: the total
+        number of matches and the page selected by `limit` and `offset`.
         """
-        # By default, search only currently relevant memories. An explicit status
-        # filter must override this so callers can retrieve retained history.
-        params = []
+        where: list[str] = []
+        params: list = []
+
+        # Default to currently relevant memories; an explicit status filter
+        # replaces that default so retained history stays reachable.
         if request.status is None:
-            where_clauses = ["status IN ('ACTIVE', 'DISPUTED')"]
+            where.append(_CURRENT_SQL)
         else:
-            where_clauses = ["status = ?"]
+            where.append("status = ?")
             params.append(request.status.value)
 
-        # Filter by memory type
         if request.memory_types:
             types = [t.value for t in request.memory_types]
-            placeholders = ",".join(["?" for _ in types])
-            where_clauses.append(f"memory_type IN ({placeholders})")
+            where.append(f"memory_type IN ({','.join('?' * len(types))})")
             params.extend(types)
 
-        # Filter by project
         if request.project_id is not None:
-            where_clauses.append("project_id = ?")
+            where.append("project_id = ?")
             params.append(request.project_id)
 
-        # Filter by minimum confidence
         if request.min_confidence > 0:
-            where_clauses.append("confidence >= ?")
+            where.append("confidence >= ?")
             params.append(request.min_confidence)
 
-        # Build base query
-        where_sql = " AND ".join(where_clauses)
-
-        # Full-text search on content
         if request.query:
-            # Simple substring match for now; can upgrade to FTS5 later
-            where_clauses.append("content LIKE ?")
-            params.append(f"%{request.query}%")
-            where_sql = " AND ".join(where_clauses)
+            # Substring match for now (FTS5 is the upgrade path); the user's
+            # text is data, so LIKE's own wildcards must not apply to it.
+            where.append(f"content LIKE ? ESCAPE '{_LIKE_ESCAPE}'")
+            params.append(_like_pattern(request.query))
 
-        # Tag filtering (all tags must be present)
         if request.tags:
-            tag_placeholders = ",".join(["?" for _ in request.tags])
-            where_sql += f"""
-                AND id IN (
+            # All tags must be present. The model has already de-duplicated
+            # them, so the distinct count is the length of the list.
+            where.append(
+                f"""id IN (
                     SELECT memory_id FROM memory_tags
-                    WHERE tag IN ({tag_placeholders})
+                    WHERE tag IN ({','.join('?' * len(request.tags))})
                     GROUP BY memory_id
                     HAVING COUNT(DISTINCT tag) = ?
-                )
-            """
+                )"""
+            )
             params.extend(request.tags)
             params.append(len(request.tags))
 
-        # Count total results
-        count_query = f"SELECT COUNT(*) as cnt FROM memories WHERE {where_sql}"
-        count_result = self.conn.execute(count_query, params).fetchone()
-        total_count = count_result["cnt"] if count_result else 0
-
-        # Fetch paginated results
-        query = f"""
+        where_sql = " AND ".join(where)
+        total = self.conn.execute(
+            f"SELECT COUNT(*) AS cnt FROM memories WHERE {where_sql}", params
+        ).fetchone()["cnt"]
+        rows = self.conn.execute(
+            f"""
             SELECT id FROM memories
             WHERE {where_sql}
-            ORDER BY created_at DESC
-            LIMIT ? OFFSET 0
-        """
-
-        # Note: we rebuild params here to avoid param count issues
-        search_params = []
-
-        # Rebuild params for the paginated query
-        search_params.extend(params)
-        search_params.append(request.limit)
-
-        results = self.conn.execute(query, search_params).fetchall()
-        memories = [self._fetch_memory(row["id"]) for row in results]
-
-        return total_count, memories
+            ORDER BY created_at DESC, id DESC
+            LIMIT ? OFFSET ?
+            """,
+            [*params, request.limit, request.offset],
+        ).fetchall()
+        return total, self._fetch_memories([row["id"] for row in rows])
 
     def get_project_context(
-        self,
-        project_id: Optional[int] = None
+        self, project_id: Optional[int] = None
     ) -> ProjectContextResponse:
         """Build a compact project context from relevant memories.
 
-        Retrieves key decisions, facts, active context, and derived knowledge
-        for a project, implementing the 'compact and relevant context' pattern
-        that replaces infinite chat history.
-
-        Args:
-            project_id: Optional project ID to scope the context
-
-        Returns:
-            ProjectContextResponse with curated memories
+        The most recent current memories of each type for one project scope
+        (`None` is the unscoped bucket): the 'compact and relevant context'
+        that replaces replaying a chat history.
         """
-        now = now_utc()
-        project_filter = "AND project_id = ?" if project_id is not None else "AND project_id IS NULL"
-        filter_param = (project_id,) if project_id is not None else ()
+        decisions = self._fetch_memories_by_type(MemoryType.DECISION, project_id)
+        facts = self._fetch_memories_by_type(MemoryType.FACT, project_id)
+        context = self._fetch_memories_by_type(MemoryType.CONTEXT, project_id)
+        knowledge = self._fetch_memories_by_type(MemoryType.KNOWLEDGE, project_id)
 
-        # Fetch top decisions (high confidence, sorted by recency)
-        decisions = self._fetch_memories_by_type(
-            MemoryType.DECISION,
-            project_id,
-            limit=5
-        )
-
-        # Fetch top facts
-        facts = self._fetch_memories_by_type(
-            MemoryType.FACT,
-            project_id,
-            limit=5
-        )
-
-        # Fetch active context (recent, temporary info)
-        context = self._fetch_memories_by_type(
-            MemoryType.CONTEXT,
-            project_id,
-            limit=5
-        )
-
-        # Fetch derived knowledge
-        knowledge = self._fetch_memories_by_type(
-            MemoryType.KNOWLEDGE,
-            project_id,
-            limit=5
-        )
-
-        # Get total count
-        total_query = f"""
-            SELECT COUNT(*) as cnt FROM memories
-            WHERE status IN ('ACTIVE', 'DISPUTED')
-            {project_filter}
-        """
-        total_result = self.conn.execute(total_query, filter_param).fetchone()
-        total_count = total_result["cnt"] if total_result else 0
-
-        summary = self._build_context_summary(decisions, facts, context, knowledge)
+        scope_sql, scope_params = _scope_clause(project_id)
+        total = self.conn.execute(
+            f"SELECT COUNT(*) AS cnt FROM memories WHERE {_CURRENT_SQL} AND {scope_sql}",
+            scope_params,
+        ).fetchone()["cnt"]
 
         return ProjectContextResponse(
             project_id=project_id,
-            summary=summary,
+            summary=_build_context_summary(decisions, facts, context, knowledge),
             key_decisions=decisions,
             key_facts=facts,
             active_context=context,
             derived_knowledge=knowledge,
-            total_memories=total_count,
-            last_updated=now,
+            total_memories=total,
+            last_updated=now_utc(),
+        )
+
+    # ----------------------------------------------------------- internals
+
+    def _require(self, memory_id: int) -> sqlite3.Row:
+        """The memory's row, or ValueError if there is no such memory."""
+        row = self.conn.execute(
+            "SELECT * FROM memories WHERE id = ?", (memory_id,)
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"Memory {memory_id} not found")
+        return row
+
+    def _write_tags(self, memory_id: int, tags: Iterable[str]) -> None:
+        self.conn.executemany(
+            "INSERT INTO memory_tags (memory_id, tag) VALUES (?, ?)",
+            [(memory_id, tag) for tag in tags],
         )
 
     def _fetch_memory(self, memory_id: int) -> MemoryResponse:
         """Fetch a single memory by ID with all relationships."""
-        row = self.conn.execute(
-            "SELECT * FROM memories WHERE id = ?",
-            (memory_id,),
-        ).fetchone()
-
-        if not row:
+        found = self._fetch_memories([memory_id])
+        if not found:
             raise ValueError(f"Memory {memory_id} not found")
+        return found[0]
 
-        # Fetch tags
-        tags = [
-            r["tag"] for r in self.conn.execute(
-                "SELECT tag FROM memory_tags WHERE memory_id = ? ORDER BY tag",
-                (memory_id,),
+    def _fetch_memories(self, ids: list[int]) -> list[MemoryResponse]:
+        """Fetch memories in the given order, with tags and lineage attached.
+
+        Three queries for any number of memories, instead of four per memory.
+        """
+        if not ids:
+            return []
+        placeholders = ",".join("?" * len(ids))
+        rows = {
+            row["id"]: row
+            for row in self.conn.execute(
+                f"SELECT * FROM memories WHERE id IN ({placeholders})", ids
             ).fetchall()
+        }
+        tags: dict[int, list[str]] = {}
+        for row in self.conn.execute(
+            f"SELECT memory_id, tag FROM memory_tags "
+            f"WHERE memory_id IN ({placeholders}) ORDER BY memory_id, tag",
+            ids,
+        ).fetchall():
+            tags.setdefault(row["memory_id"], []).append(row["tag"])
+        superseded_by: dict[int, int] = {}
+        supersedes: dict[int, int] = {}
+        for row in self.conn.execute(
+            f"SELECT superseded_id, superseding_id FROM memory_lineage "
+            f"WHERE superseded_id IN ({placeholders}) OR superseding_id IN ({placeholders}) "
+            f"ORDER BY recorded_at, rowid",
+            [*ids, *ids],
+        ).fetchall():
+            # A memory has at most one successor (enforced on write). It may
+            # replace several predecessors; the first recorded one is shown.
+            superseded_by[row["superseded_id"]] = row["superseding_id"]
+            supersedes.setdefault(row["superseding_id"], row["superseded_id"])
+
+        return [
+            MemoryResponse(
+                memory_id=row["id"],
+                memory_type=MemoryType(row["memory_type"]),
+                content=row["content"],
+                status=MemoryStatus(row["status"]),
+                confidence=row["confidence"],
+                tags=tags.get(row["id"], []),
+                source_message_id=row["source_message_id"],
+                project_id=row["project_id"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+                superseded_by=superseded_by.get(row["id"]),
+                supersedes=supersedes.get(row["id"]),
+                metadata=json.loads(row["metadata"]) if row["metadata"] else {},
+            )
+            for memory_id in ids
+            if (row := rows.get(memory_id)) is not None
         ]
-
-        # Fetch supersession info
-        superseded_by = self.conn.execute(
-            "SELECT superseding_id FROM memory_lineage WHERE superseded_id = ? LIMIT 1",
-            (memory_id,),
-        ).fetchone()
-
-        supersedes = self.conn.execute(
-            "SELECT superseded_id FROM memory_lineage WHERE superseding_id = ? LIMIT 1",
-            (memory_id,),
-        ).fetchone()
-
-        metadata = json.loads(row["metadata"]) if row["metadata"] else {}
-
-        return MemoryResponse(
-            memory_id=row["id"],
-            memory_type=MemoryType(row["memory_type"]),
-            content=row["content"],
-            status=MemoryStatus(row["status"]),
-            confidence=row["confidence"],
-            tags=tags,
-            source_message_id=row["source_message_id"],
-            project_id=row["project_id"],
-            created_at=row["created_at"],
-            updated_at=row["updated_at"],
-            superseded_by=superseded_by["superseding_id"] if superseded_by else None,
-            supersedes=supersedes["superseded_id"] if supersedes else None,
-            metadata=metadata,
-        )
 
     def _fetch_memories_by_type(
         self,
         memory_type: MemoryType,
         project_id: Optional[int] = None,
-        limit: int = 5
+        limit: int = 5,
     ) -> list[MemoryResponse]:
-        """Fetch top memories of a specific type for a project."""
-        query = """
+        """The most recent current memories of one type in one project scope."""
+        scope_sql, scope_params = _scope_clause(project_id)
+        rows = self.conn.execute(
+            f"""
             SELECT id FROM memories
-            WHERE memory_type = ? AND status IN ('ACTIVE', 'DISPUTED')
-        """
-        params = [memory_type.value]
+            WHERE memory_type = ? AND {_CURRENT_SQL} AND {scope_sql}
+            ORDER BY created_at DESC, id DESC LIMIT ?
+            """,
+            (memory_type.value, *scope_params, limit),
+        ).fetchall()
+        return self._fetch_memories([row["id"] for row in rows])
 
-        if project_id is not None:
-            query += " AND project_id = ?"
-            params.append(project_id)
-        else:
-            query += " AND project_id IS NULL"
 
-        query += " ORDER BY created_at DESC LIMIT ?"
-        params.append(limit)
+def _dump_metadata(metadata: Optional[dict]) -> Optional[str]:
+    return json.dumps(metadata) if metadata else None
 
-        rows = self.conn.execute(query, params).fetchall()
-        return [self._fetch_memory(row["id"]) for row in rows]
 
-    def _build_context_summary(
-        self,
-        decisions: list[MemoryResponse],
-        facts: list[MemoryResponse],
-        context: list[MemoryResponse],
-        knowledge: list[MemoryResponse],
-    ) -> str:
-        """Build a human-readable summary of the project context."""
-        lines = []
+def _snippet(content: str) -> str:
+    if len(content) <= SUMMARY_SNIPPET_CHARS:
+        return content
+    return content[:SUMMARY_SNIPPET_CHARS] + "..."
 
-        if decisions:
-            lines.append("**Key Decisions:**")
-            for mem in decisions[:3]:
-                lines.append(f"- {mem.content[:100]}...")
 
-        if facts:
-            lines.append("\n**Key Facts:**")
-            for mem in facts[:3]:
-                lines.append(f"- {mem.content[:100]}...")
-
-        if context:
-            lines.append("\n**Active Context:**")
-            for mem in context[:3]:
-                lines.append(f"- {mem.content[:100]}...")
-
-        if knowledge:
-            lines.append("\n**Derived Knowledge:**")
-            for mem in knowledge[:3]:
-                lines.append(f"- {mem.content[:100]}...")
-
-        return "\n".join(lines) if lines else "No memories found for this project."
+def _build_context_summary(
+    decisions: list[MemoryResponse],
+    facts: list[MemoryResponse],
+    context: list[MemoryResponse],
+    knowledge: list[MemoryResponse],
+) -> str:
+    """A human-readable summary of the project context."""
+    sections = (
+        ("Key Decisions", decisions),
+        ("Key Facts", facts),
+        ("Active Context", context),
+        ("Derived Knowledge", knowledge),
+    )
+    blocks = []
+    for title, memories in sections:
+        if memories:
+            lines = [f"**{title}:**"]
+            lines.extend(f"- {_snippet(mem.content)}" for mem in memories[:3])
+            blocks.append("\n".join(lines))
+    return "\n\n".join(blocks) if blocks else "No memories found for this project."

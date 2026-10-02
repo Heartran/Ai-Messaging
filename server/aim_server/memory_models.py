@@ -15,9 +15,51 @@ Memory Classification:
 
 from __future__ import annotations
 
+import json
 from enum import Enum
 from typing import Optional
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+# Bounds that keep one memory from swallowing the database. `content` was
+# capped from the start; tags and metadata were not, and an unbounded JSON
+# blob is still a row in the same table.
+MAX_TAGS = 20
+MAX_TAG_LENGTH = 64
+MAX_METADATA_BYTES = 8000
+
+
+def normalize_tags(tags: Optional[list[str]]) -> Optional[list[str]]:
+    """Canonical tag list: trimmed, lower-cased, de-duplicated, order kept.
+
+    'Backend' and 'backend' are one tag, not two: a search by tag is only as
+    useful as the writers' consistency, and agents are not consistent.
+    Empty tags are rejected rather than dropped — a blank tag is a client
+    bug, and a silently-dropped parameter is the failure mode this server
+    refuses everywhere else (§7.4).
+    """
+    if tags is None:
+        return None
+    seen: dict[str, None] = {}
+    for raw in tags:
+        tag = raw.strip().lower()
+        if not tag:
+            raise ValueError("tags must not be empty or whitespace")
+        if len(tag) > MAX_TAG_LENGTH:
+            raise ValueError(f"tag {tag[:MAX_TAG_LENGTH]!r}… exceeds {MAX_TAG_LENGTH} characters")
+        seen.setdefault(tag, None)
+    if len(seen) > MAX_TAGS:
+        raise ValueError(f"at most {MAX_TAGS} distinct tags per memory")
+    return list(seen)
+
+
+def check_metadata_size(metadata: Optional[dict]) -> Optional[dict]:
+    """Refuse metadata whose JSON form exceeds MAX_METADATA_BYTES."""
+    if metadata is None:
+        return None
+    size = len(json.dumps(metadata, ensure_ascii=False).encode("utf-8"))
+    if size > MAX_METADATA_BYTES:
+        raise ValueError(f"metadata is {size} bytes serialized; the limit is {MAX_METADATA_BYTES}")
+    return metadata
 
 
 class MemoryType(str, Enum):
@@ -68,13 +110,23 @@ class StoreMemoryRequest(StrictMemoryModel):
     )
     tags: list[str] = Field(
         default_factory=list,
-        max_length=20,
-        description="Search tags for semantic retrieval (e.g. 'backend', 'database')"
+        description="Search tags for semantic retrieval (e.g. 'backend', 'database'). "
+        "Trimmed, lower-cased and de-duplicated; at most 20."
     )
     metadata: dict = Field(
         default_factory=dict,
-        description="Optional structured metadata (JSON)"
+        description=f"Optional structured metadata (JSON, at most {MAX_METADATA_BYTES} bytes)"
     )
+
+    @field_validator("tags")
+    @classmethod
+    def _tags(cls, value: list[str]) -> list[str]:
+        return normalize_tags(value) or []
+
+    @field_validator("metadata")
+    @classmethod
+    def _metadata(cls, value: dict) -> dict:
+        return check_metadata_size(value) or {}
 
 
 class UpdateMemoryRequest(StrictMemoryModel):
@@ -99,13 +151,22 @@ class UpdateMemoryRequest(StrictMemoryModel):
     )
     tags: Optional[list[str]] = Field(
         default=None,
-        max_length=20,
-        description="Updated tags"
+        description="Updated tags (replaces the whole set; same normalization as on store)"
     )
     metadata: Optional[dict] = Field(
         default=None,
-        description="Updated metadata"
+        description="Updated metadata (replaces the whole object)"
     )
+
+    @field_validator("tags")
+    @classmethod
+    def _tags(cls, value: Optional[list[str]]) -> Optional[list[str]]:
+        return normalize_tags(value)
+
+    @field_validator("metadata")
+    @classmethod
+    def _metadata(cls, value: Optional[dict]) -> Optional[dict]:
+        return check_metadata_size(value)
 
 
 class SupersedeMemoryRequest(StrictMemoryModel):
@@ -153,7 +214,7 @@ class SearchMemoriesRequest(StrictMemoryModel):
     )
     tags: Optional[list[str]] = Field(
         default=None,
-        description="Filter by tags (must match all)"
+        description="Filter by tags (must match all; same normalization as on store)"
     )
     project_id: Optional[int] = Field(
         default=None,
@@ -175,6 +236,16 @@ class SearchMemoriesRequest(StrictMemoryModel):
         le=100,
         description="Maximum results to return"
     )
+    offset: int = Field(
+        default=0,
+        ge=0,
+        description="Results to skip, for paging through total_results"
+    )
+
+    @field_validator("tags")
+    @classmethod
+    def _tags(cls, value: Optional[list[str]]) -> Optional[list[str]]:
+        return normalize_tags(value)
 
 
 class MemoryResponse(StrictMemoryModel):
