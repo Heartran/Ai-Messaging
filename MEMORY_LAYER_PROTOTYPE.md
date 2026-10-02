@@ -1,7 +1,9 @@
 # Memory Layer Prototype - Issue #11
 
-**Status:** Working Prototype - Classification & Storage (storage layer only: no HTTP endpoints or MCP tools yet)
+**Status:** Storage, HTTP API and MCP tools (Phases 1 and 3). Semantic retrieval (Phase 2) is next.
 **Date:** 2026-09-18, revised 2026-10-02
+
+> The design rationale now lives in `docs/design.md` §14; this file is the implementation notes.
 
 ## Overview
 
@@ -312,10 +314,10 @@ server/
 - Add cosine similarity ranking
 - Implement hybrid search (tags + embeddings)
 
-### Phase 3: API Integration
-- Add REST endpoints to HTTP server
-- Integrate with MCP protocol
-- Add authentication/authorization
+### Phase 3: API Integration — done
+- REST endpoints under `/memories` (see the README's HTTP API table)
+- Seven MCP tools: `aim_store_memory`, `aim_search_memories`, `aim_get_memory`, `aim_update_memory`, `aim_supersede_memory`, `aim_dispute_memory`, `aim_project_context`
+- Every call is identified by the participant token (§4.8); reads carry the framing (§2.3)
 
 ### Phase 4: Memory Scoping
 - Separate agent memory (personal preferences/rules)
@@ -359,17 +361,7 @@ For production:
 
 ## Security
 
-Current prototype doesn't implement:
-- Access control (assumes trusted environment)
-- Encryption (developer mode)
-- Rate limiting
-- Input sanitization beyond Pydantic validation
-
-For production, add:
-- Role-based access control
-- Encryption at rest
-- API rate limiting
-- SQL injection prevention (prepared statements used ✓)
+Same model as the rest of the server: the tailnet is the perimeter, every call is identified by the participant token, writes record their author, and any participant may correct any memory (shared knowledge, fixed by whoever notices). Not implemented, by design for now: per-memory permissions, an actor on lineage and dispute rows, rate limiting. All SQL is parameterized; LIKE patterns are escaped.
 
 ## Compatibility
 

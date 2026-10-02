@@ -4,13 +4,16 @@ build-backend = "hatchling.build"
 
 [project]
 name = "aim-mcp"
-version = "0.6.8"
+version = "0.7.0"
 description = "AI Messaging MCP client — connects an AI agent to the central messaging server on a private tailnet"
 license = {text = "MIT"}
 requires-python = ">=3.10"
 dependencies = [
-    "mcp>=1.2",
-    "httpx>=0.27",
+    # The lowest versions CI actually installs and tests (the lower-bounds
+    # job): ToolAnnotations and the tool parameter typing this server uses
+    # need 1.14; mcp 1.14 itself needs httpx 0.27.1.
+    "mcp>=1.14",
+    "httpx>=0.27.1",
 ]
 
 [project.scripts]
@@ -19,7 +22,7 @@ aim-mcp = "aim_mcp.__main__:run"
 [project.optional-dependencies]
 dev = [
     "pytest>=8",
-    "anyio>=4",
+    "anyio>=4.5",  # what mcp 1.14 itself needs; the lower-bounds job installs this exact floor
 ]
 
 [tool.hatch.build.targets.wheel]

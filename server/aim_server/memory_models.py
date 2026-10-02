@@ -129,10 +129,9 @@ class StoreMemoryRequest(StrictMemoryModel):
         return check_metadata_size(value) or {}
 
 
-class UpdateMemoryRequest(StrictMemoryModel):
-    """Update an existing memory's content or metadata."""
+class MemoryPatch(StrictMemoryModel):
+    """The editable fields of a memory. None = leave untouched."""
 
-    memory_id: int = Field(description="Memory ID to update")
     content: Optional[str] = Field(
         default=None,
         min_length=1,
@@ -167,6 +166,12 @@ class UpdateMemoryRequest(StrictMemoryModel):
     @classmethod
     def _metadata(cls, value: Optional[dict]) -> Optional[dict]:
         return check_metadata_size(value)
+
+
+class UpdateMemoryRequest(MemoryPatch):
+    """Update an existing memory's content or metadata (store-level request)."""
+
+    memory_id: int = Field(description="Memory ID to update")
 
 
 class SupersedeMemoryRequest(StrictMemoryModel):
@@ -259,6 +264,9 @@ class MemoryResponse(StrictMemoryModel):
     tags: list[str]
     source_message_id: Optional[int]
     project_id: Optional[int]
+    creator_id: Optional[int] = Field(
+        description="Participant who stored this memory; None when unknown or merged away"
+    )
     created_at: str
     updated_at: str
     superseded_by: Optional[int]
@@ -285,3 +293,50 @@ class ProjectContextResponse(StrictMemoryModel):
     derived_knowledge: list[MemoryResponse]
     total_memories: int
     last_updated: str
+
+
+# ------------------------------------------------------------ HTTP bodies
+#
+# The HTTP API carries the caller in the body like every other identified
+# write (`participant_id`, proven by the X-AIM-Token header); the memory ID
+# travels in the path. These models are the store-level requests plus that
+# field, so the validation rules live in one place.
+
+
+class StoreMemoryBody(StoreMemoryRequest):
+    """POST /memories."""
+
+    participant_id: int = Field(description="The calling participant (the memory's creator)")
+
+
+class UpdateMemoryBody(MemoryPatch):
+    """PATCH /memories/{memory_id}."""
+
+    participant_id: int = Field(description="The calling participant")
+
+
+class SupersedeMemoryBody(StrictMemoryModel):
+    """POST /memories/{memory_id}/supersede: the path memory is the one being replaced."""
+
+    participant_id: int = Field(description="The calling participant")
+    superseding_memory_id: int = Field(description="Memory ID that replaces the one in the path")
+    reason: Optional[str] = Field(
+        default=None,
+        max_length=1000,
+        description="Reason for supersession (contradiction, evolution, etc)"
+    )
+
+
+class DisputeMemoryBody(StrictMemoryModel):
+    """POST /memories/{memory_id}/dispute."""
+
+    participant_id: int = Field(description="The calling participant")
+    conflicting_memory_id: Optional[int] = Field(
+        default=None,
+        description="ID of the conflicting memory if known"
+    )
+    reason: str = Field(
+        min_length=1,
+        max_length=1000,
+        description="Explanation of the contradiction"
+    )
