@@ -111,7 +111,7 @@ class DesktopApp:
             # a windowed executable has no stderr anybody reads.
             self.server_url, self.url_source = None, "none"
             self.startup_error = str(exc)
-        self.notifier = make_notifier(ASSETS / "icon.ico")
+        self.notifier = make_notifier(ASSETS / "icon.ico", ASSETS / "icon.png")
         self.bridge = DesktopBridge(self, self.notifier, config_file, self.allow_loopback)
         self.tray = Tray(self.show_window, self.ask_server, self.quit)
         self.window: Any = None

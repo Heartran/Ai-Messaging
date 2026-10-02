@@ -72,7 +72,11 @@ class WindowsToastNotifier:
     available = True
     reason = "windows-toasts"
 
-    def __init__(self, icon_path: Path | None = None) -> None:
+    def __init__(self, icon_path: Path | None = None, image_path: Path | None = None) -> None:
+        """`icon_path` is the .ico the registry wants for the app identity;
+        `image_path` is the picture on the toast itself. Keep them apart: an
+        .ico handed to the toast is rendered from its smallest frame, 16 px
+        blown up to a blur. The toast gets the full-size .png."""
         # pylint: disable=import-error  # Windows-only dependency
         from windows_toasts import InteractableWindowsToaster, Toast, ToastDisplayImage, ToastImagePosition
 
@@ -80,6 +84,7 @@ class WindowsToastNotifier:
         self._image_cls = ToastDisplayImage
         self._logo_position = ToastImagePosition.AppLogo
         self._icon = icon_path if icon_path and icon_path.exists() else None
+        self._image = image_path if image_path and image_path.exists() else self._icon
         aumid = self._register_aumid()
         self._toaster = InteractableWindowsToaster(APP_NAME, notifierAUMID=aumid)
 
@@ -105,12 +110,12 @@ class WindowsToastNotifier:
     def show(self, title: str, body: str, on_click: OnClick | None = None) -> None:
         toast = self._toast_cls([clip(title, MAX_TITLE), clip(body, MAX_BODY)], group=TOAST_GROUP)
         toast.tag = TOAST_TAG
-        if self._icon is not None:
+        if self._image is not None:
             try:
                 # The small round logo on the left, like a chat avatar. The default
                 # (inline) placement renders the image full-width under the text.
                 toast.AddImage(self._image_cls.fromPath(
-                    self._icon, position=self._logo_position, circleCrop=True))
+                    self._image, position=self._logo_position, circleCrop=True))
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 log.debug("toast without icon: %s", exc)
         if on_click is not None:
@@ -126,14 +131,15 @@ class WindowsToastNotifier:
             log.warning("could not show the notification: %s", exc)
 
 
-def make_notifier(icon_path: Path | None = None, platform: str | None = None) -> Notifier:
+def make_notifier(icon_path: Path | None = None, image_path: Path | None = None,
+                  platform: str | None = None) -> Notifier:
     """The best backend this machine offers. Never raises: a missing backend
     is a degraded mode the page is told about, not a crash at startup."""
     plat = sys.platform if platform is None else platform
     if plat != "win32":
         return NullNotifier(f"native notifications are implemented for Windows only (this is {plat})")
     try:
-        return WindowsToastNotifier(icon_path)
+        return WindowsToastNotifier(icon_path, image_path)
     except ImportError as exc:
         return NullNotifier(f"the windows-toasts package is not installed ({exc})")
     except Exception as exc:  # pylint: disable=broad-exception-caught
