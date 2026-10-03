@@ -13,7 +13,7 @@ the app's own browser profile exactly as they would in a browser.
 ## Install from a build
 
 Download `aim-desktop-windows.zip` from the latest *Desktop app (Windows)*
-workflow run (or a `desktop-v*` release), unzip anywhere, run
+workflow run (or the release for the version), unzip anywhere, run
 `AI Messaging.exe`. First launch asks for the server address — the
 tailnet IP the server binds to (`tailscale ip -4` on that machine). Needs
 the WebView2 runtime, which Windows 10/11 already have.

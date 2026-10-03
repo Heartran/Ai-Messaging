@@ -554,7 +554,7 @@ Vale la §2.1 anche in uscita: l'app **rifiuta di collegarsi fuori dalla tailnet
 
 Stato e profilo del browser (identità, checkpoint, impostazioni della pagina) vivono nel profilo WebView2 dell'app, nei dati dell'utente — persistono tra un avvio e l'altro esattamente come in un browser (§3). Il server non sa nemmeno che esiste un'app: per lui è un browser in più.
 
-Il binario è un prodotto di CI, non della macchina di qualcuno: la workflow `desktop.yml` lo costruisce con PyInstaller su `windows-latest` (i moduli WinRT esistono solo lì) e pubblica lo zip come artefatto, o come release sui tag `desktop-v*`. Nessun dettaglio dell'installazione entra nel pacchetto (§12.1): l'indirizzo del server lo chiede al primo avvio.
+Il binario è un prodotto di CI, non della macchina di qualcuno: la workflow `desktop.yml` lo costruisce con PyInstaller su `windows-latest` (i moduli WinRT esistono solo lì) e pubblica lo zip come artefatto, o nella release della versione sui tag `v*` (una versione sola per server, client e app: `scripts/version.py`). Nessun dettaglio dell'installazione entra nel pacchetto (§12.1): l'indirizzo del server lo chiede al primo avvio.
 
 ---
 
@@ -650,7 +650,7 @@ Il caso è garantito ogni volta che l'username del sistema operativo differisce 
 **Regole:**
 
 - **Il bundle `.mcpb` non deve contenere un `.venv` precostruito.** Va creato sulla macchina di destinazione.
-- **Il bundle è un artefatto, non un file del repo.** Lo costruisce la CI con il CLI ufficiale (`.github/workflows/mcpb.yml`): su ogni pull request che tocca `mcp/` gira `mcpb validate` sul manifest, a ogni push su `main` (e sui tag `mcp-v*`, come release) gira `mcpb pack` e pubblica `aim-mcp-<versione>.mcpb`; `*.mcpb` è in `.gitignore` e `mcp/.mcpbignore` tiene fuori test, cache e virtualenv. La suite del client confronta il manifest con i sorgenti: versione uguale a `pyproject.toml`, lista `tools` uguale ai tool registrati dal server MCP. Un manifest vecchio è un test rosso, non una sorpresa su un'altra macchina.
+- **Il bundle è un artefatto, non un file del repo.** Lo costruisce la CI con il CLI ufficiale (`.github/workflows/mcpb.yml`): su ogni pull request che tocca `mcp/` gira `mcpb validate` sul manifest, a ogni push su `main` (e sui tag `v*`, nella release della versione) gira `mcpb pack` e pubblica `aim-mcp-<versione>.mcpb`; `*.mcpb` è in `.gitignore` e `mcp/.mcpbignore` tiene fuori test, cache e virtualenv. La suite del client confronta il manifest con i sorgenti: versione uguale a `pyproject.toml`, lista `tools` uguale ai tool registrati dal server MCP. Un manifest vecchio è un test rosso, non una sorpresa su un'altra macchina.
 - `.venv/` in `.gitignore`, e verificare che non finisca nel pacchetto.
 - Vale a maggior ragione per un repo pubblico: chiunque installi da GitHub inciamperebbe nello stesso errore, per giunta trovandosi i path con l'username dell'autore.
 

@@ -10,7 +10,7 @@ resolution-markers = [
 
 [[package]]
 name = "aim-mcp"
-version = "0.7.0"
+version = "0.15.1"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
