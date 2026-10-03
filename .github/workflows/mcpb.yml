@@ -19,6 +19,11 @@ on:
       - "mcp/**"
       - ".github/workflows/mcpb.yml"
 
+# Least privilege: nothing here needs to write to the repository except
+# the release step, which gets it on its own job.
+permissions:
+  contents: read
+
 env:
   MCPB_VERSION: "2.1.2"
 
@@ -53,6 +58,8 @@ jobs:
     needs: validate
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # the release on mcp-v* tags
     steps:
       - uses: actions/checkout@v4
 
