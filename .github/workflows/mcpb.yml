@@ -77,7 +77,7 @@ jobs:
                            "user_config.example.json", "aim_mcp/__main__.py", "aim_mcp/server.py"):
               assert required in names, f"missing from bundle: {required}"
           bad = [n for n in names if ".venv" in n or "__pycache__" in n or n.startswith("tests/")
-                 or n.endswith((".pyc", ".mcpb")) or n == "build_bundle.py"]
+                 or n.endswith((".pyc", ".mcpb"))]
           assert not bad, f"should not be in the bundle: {bad}"
           print(path, "OK:", len(names), "files")
           for n in sorted(names): print("  ", n)

@@ -1,21 +1,19 @@
 """The `.mcpb` bundle must not drift behind the sources (design §12.5).
 
-The committed bundle sat at 0.6.4 while the code reached 0.7.0, with a
-manifest that listed none of the newer tools. These tests make that
-impossible to miss: the manifest's version follows pyproject.toml, its
-tool list is exactly what the MCP server registers, and the bundle ships
-the current sources and never a virtualenv.
+The bundle is no longer committed: CI builds it with the official `mcpb`
+CLI (.github/workflows/mcpb.yml) and checks what went in. What can still
+drift is the manifest — its version against pyproject.toml, its tool list
+against what the MCP server registers — and the ignore file that keeps
+tests, caches and virtualenvs out of the pack. Both are pinned here.
 """
 
 import json
 import re
-import zipfile
 from pathlib import Path
 
 import pytest
 
 MCP_DIR = Path(__file__).resolve().parents[1]
-BUNDLE = MCP_DIR / "aim.mcpb"
 
 pytestmark = pytest.mark.anyio
 
@@ -43,21 +41,20 @@ async def test_the_manifest_matches_the_code(monkeypatch):
         assert tool["description"].strip(), tool["name"]
 
 
-def test_the_bundle_ships_the_current_sources_and_no_venv():
-    with zipfile.ZipFile(BUNDLE) as archive:
-        names = set(archive.namelist())
-        assert not any(".venv" in name or "__pycache__" in name for name in names)
-        for name in (
-            "manifest.json", "pyproject.toml", "uv.lock", "icon.png", "LICENSE",
-            "user_config.example.json", "aim_mcp/__main__.py",
-        ):
-            assert name in names, name
-        for module in ("__init__", "__main__", "client", "server", "tools", "user_config"):
-            bundled = archive.read(f"aim_mcp/{module}.py")
-            assert bundled == (MCP_DIR / "aim_mcp" / f"{module}.py").read_bytes(), (
-                f"aim_mcp/{module}.py in the bundle differs from the source: "
-                "rebuild with python build_bundle.py"
-            )
-        assert archive.read("manifest.json") == (MCP_DIR / "manifest.json").read_bytes()
-        assert archive.read("pyproject.toml") == (MCP_DIR / "pyproject.toml").read_bytes()
-        assert archive.read("uv.lock") == (MCP_DIR / "uv.lock").read_bytes()
+def test_everything_the_bundle_ships_is_here():
+    # mcpb pack takes the directory as it is: what the manifest and the
+    # install need must exist next to it.
+    manifest = json.loads((MCP_DIR / "manifest.json").read_text("utf-8"))
+    for name in ("pyproject.toml", "uv.lock", "LICENSE", "user_config.example.json",
+                 manifest["icon"], manifest["server"]["entry_point"]):
+        assert (MCP_DIR / name).is_file(), name
+    assert (MCP_DIR / "LICENSE").read_bytes() == (MCP_DIR.parent / "LICENSE").read_bytes(), (
+        "mcp/LICENSE is a copy of the repo license and must stay identical")
+
+
+def test_the_pack_leaves_out_what_must_never_ship():
+    ignored = {line.strip() for line in (MCP_DIR / ".mcpbignore").read_text("utf-8").splitlines()
+               if line.strip() and not line.startswith("#")}
+    for pattern in (".venv/", "__pycache__/", "*.pyc", ".pytest_cache/", "tests/", "*.mcpb"):
+        assert pattern in ignored, f"{pattern} missing from .mcpbignore"
+    assert not (MCP_DIR / "aim.mcpb").exists(), "the bundle is a CI artifact, never committed"

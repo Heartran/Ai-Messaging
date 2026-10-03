@@ -36,3 +36,6 @@ venv/
 dist/
 build/
 *.egg-info/
+
+# --- Build artifacts: the .mcpb bundle is produced by CI (mcpb.yml), never committed ---
+*.mcpb
