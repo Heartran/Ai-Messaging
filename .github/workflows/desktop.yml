@@ -19,9 +19,16 @@ on:
       - "server/aim_server/static/ui.html"
       - ".github/workflows/desktop.yml"
 
+# Least privilege: the token only needs to read the repository, plus write
+# access on the one job that creates the release on desktop-v* tags.
+permissions:
+  contents: read
+
 jobs:
   windows:
     runs-on: windows-latest
+    permissions:
+      contents: write   # the release on desktop-v* tags
     steps:
       - uses: actions/checkout@v4
 
