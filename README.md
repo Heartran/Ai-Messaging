@@ -344,14 +344,19 @@ is too low fails in CI and not on somebody's older machine; the memory
 layer demo as a smoke test; wheel packaging; and pylint at 10/10. Every
 job prints `pip freeze`, so a failure is diagnosable from the log alone.
 
-**Packaging the `.mcpb` extension bundle: `python build_bundle.py`.**
-Run it in `mcp/` after `uv lock`; it zips the sources, `pyproject.toml`,
-`uv.lock`, `manifest.json`, the icon, the license and the user_config
-example into `aim.mcpb`. The client suite checks the committed bundle
-against the sources — same files, manifest version equal to
-`pyproject.toml`, manifest `tools` equal to the tools the MCP server
-registers — so a bundle cannot drift behind the code unnoticed: bump the
-version, update the manifest, rebuild, commit all three together.
+**Packaging the `.mcpb` extension bundle.** CI does it with the official
+CLI (`.github/workflows/mcpb.yml`): every pull request touching `mcp/`
+runs `mcpb validate` on the manifest, and every push to `main` (and
+every `mcp-v*` tag, as a release) runs `mcpb pack` and publishes
+`aim-mcp-<version>.mcpb` as a workflow artifact. The bundle is an
+artifact, never committed (`*.mcpb` is git-ignored); `mcp/.mcpbignore`
+keeps tests and caches out of it. Locally the same thing is
+`npx @anthropic-ai/mcpb pack mcp aim.mcpb` after `uv lock`: the sources,
+`pyproject.toml`, `uv.lock`, `manifest.json`, the icon, the license and
+the user_config example. The client suite checks the manifest against the sources —
+version equal to `pyproject.toml`, `tools` equal to the tools the MCP
+server registers — so a bundle cannot drift behind the code unnoticed:
+bump the version and update the manifest together, CI packs the rest.
 **Never include `.venv`.** Python virtualenvs are not relocatable — they
 hardcode absolute paths to the base interpreter of the machine (and
 username) they were built on, and die with cryptic errors anywhere else.

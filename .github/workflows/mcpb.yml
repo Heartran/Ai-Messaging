@@ -1,0 +1,104 @@
+name: MCP bundle (.mcpb)
+
+# Two moments, two jobs. Before anything lands on main — on every pull
+# request touching the client — `mcpb validate` checks the manifest against
+# the official schema. After it lands (push to main) and on `mcp-v*` tags,
+# `mcpb pack` builds the bundle with the official CLI and publishes it as a
+# workflow artifact (and as a release on tags). The bundle is a product of
+# CI, not of somebody's machine.
+
+on:
+  pull_request:
+    paths:
+      - "mcp/**"
+      - ".github/workflows/mcpb.yml"
+  push:
+    branches: [main]
+    tags: ["mcp-v*"]
+    paths:
+      - "mcp/**"
+      - ".github/workflows/mcpb.yml"
+
+# Least privilege: nothing here needs to write to the repository except
+# the release step, which gets it on its own job.
+permissions:
+  contents: read
+
+env:
+  MCPB_VERSION: "2.1.2"
+
+jobs:
+  validate:
+    name: mcpb validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Validate the manifest against the official schema
+        run: npx --yes @anthropic-ai/mcpb@${MCPB_VERSION} validate mcp/manifest.json
+
+      - name: The manifest version must be the package version
+        run: |
+          python3 - <<'PY'
+          import json, re, pathlib
+          manifest = json.loads(pathlib.Path("mcp/manifest.json").read_text("utf-8"))
+          pyproject = pathlib.Path("mcp/pyproject.toml").read_text("utf-8")
+          version = re.search(r'^version = "([^"]+)"', pyproject, re.M).group(1)
+          assert manifest["version"] == version, (
+              f"manifest.json says {manifest['version']!r}, pyproject.toml says {version!r}")
+          print("manifest", version, "OK")
+          PY
+
+  pack:
+    name: mcpb pack
+    needs: validate
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # the release on mcp-v* tags
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Pack the bundle with the official CLI
+        working-directory: mcp
+        run: |
+          VERSION=$(python3 -c "import json; print(json.load(open('manifest.json'))['version'])")
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          npx --yes @anthropic-ai/mcpb@${MCPB_VERSION} pack . "../aim-mcp-${VERSION}.mcpb"
+
+      - name: Check what went in (sources and lock, no caches, no tests, no venv)
+        run: |
+          python3 - <<'PY'
+          import os, zipfile
+          path = f"aim-mcp-{os.environ['VERSION']}.mcpb"
+          names = set(zipfile.ZipFile(path).namelist())
+          for required in ("manifest.json", "pyproject.toml", "uv.lock", "icon.png", "LICENSE",
+                           "user_config.example.json", "aim_mcp/__main__.py", "aim_mcp/server.py"):
+              assert required in names, f"missing from bundle: {required}"
+          bad = [n for n in names if ".venv" in n or "__pycache__" in n or n.startswith("tests/")
+                 or n.endswith((".pyc", ".mcpb"))]
+          assert not bad, f"should not be in the bundle: {bad}"
+          print(path, "OK:", len(names), "files")
+          for n in sorted(names): print("  ", n)
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aim-mcpb
+          path: aim-mcp-*.mcpb
+          if-no-files-found: error
+
+      - name: Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/mcp-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: aim-mcp-*.mcpb
+          generate_release_notes: true
