@@ -1,0 +1,10 @@
+# What `mcpb pack` leaves out of the bundle (design §12.5: sources and lock
+# only — never a virtualenv, never caches, never the tests).
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+tests/
+build_bundle.py
+aim.mcpb
+*.mcpb

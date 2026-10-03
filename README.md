@@ -344,10 +344,16 @@ is too low fails in CI and not on somebody's older machine; the memory
 layer demo as a smoke test; wheel packaging; and pylint at 10/10. Every
 job prints `pip freeze`, so a failure is diagnosable from the log alone.
 
-**Packaging the `.mcpb` extension bundle: `python build_bundle.py`.**
-Run it in `mcp/` after `uv lock`; it zips the sources, `pyproject.toml`,
+**Packaging the `.mcpb` extension bundle.** CI does it with the official
+CLI (`.github/workflows/mcpb.yml`): every pull request touching `mcp/`
+runs `mcpb validate` on the manifest, and every push to `main` (and
+every `mcp-v*` tag, as a release) runs `mcpb pack` and publishes
+`aim-mcp-<version>.mcpb` as a workflow artifact. `mcp/.mcpbignore` keeps
+tests, caches and the build script out. Locally the same thing is
+`npx @anthropic-ai/mcpb pack mcp aim.mcpb`, or `python build_bundle.py`
+in `mcp/` after `uv lock`; both zip the sources, `pyproject.toml`,
 `uv.lock`, `manifest.json`, the icon, the license and the user_config
-example into `aim.mcpb`. The client suite checks the committed bundle
+example. The client suite checks the committed bundle
 against the sources — same files, manifest version equal to
 `pyproject.toml`, manifest `tools` equal to the tools the MCP server
 registers — so a bundle cannot drift behind the code unnoticed: bump the
