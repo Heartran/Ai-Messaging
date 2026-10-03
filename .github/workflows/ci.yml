@@ -28,6 +28,9 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: One version across server, client and desktop
+        run: python scripts/version.py check
+
       - name: Install packages
         run: |
           python -m pip install --upgrade pip

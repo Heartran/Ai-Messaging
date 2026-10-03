@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "aim-desktop"
-version = "0.1.0"
+version = "0.15.1"
 description = "AI Messaging desktop app for Windows — the web UI in a native window, with Windows notifications and a tray icon"
 license = {text = "MIT"}
 requires-python = ">=3.10"

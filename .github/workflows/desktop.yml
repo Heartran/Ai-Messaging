@@ -2,17 +2,14 @@ name: Desktop app (Windows)
 
 # The desktop app is a Windows binary and its notification backend is
 # WinRT, so it is tested and built where it runs. Every push produces the
-# zipped build as a workflow artifact; a `desktop-v*` tag attaches it to
-# a GitHub release.
+# zipped build as a workflow artifact; a `v*` tag attaches it to the
+# project's GitHub release for that version, next to the .mcpb bundle
+# (one version for server, client and desktop: scripts/version.py).
 
 on:
   push:
     branches: [main]
-    tags: ["desktop-v*"]
-    paths:
-      - "desktop/**"
-      - "server/aim_server/static/ui.html"
-      - ".github/workflows/desktop.yml"
+    tags: ["v*"]
   pull_request:
     paths:
       - "desktop/**"
@@ -20,7 +17,7 @@ on:
       - ".github/workflows/desktop.yml"
 
 # Least privilege: the token only needs to read the repository, plus write
-# access on the one job that creates the release on desktop-v* tags.
+# access on the one job that creates the release on v* tags.
 permissions:
   contents: read
 
@@ -28,13 +25,19 @@ jobs:
   windows:
     runs-on: windows-latest
     permissions:
-      contents: write   # the release on desktop-v* tags
+      contents: write   # the release on v* tags
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+
+      - name: One version across server, client and desktop
+        shell: bash
+        run: |
+          python scripts/version.py check ${{ startsWith(github.ref, 'refs/tags/') && format('--tag {0}', github.ref_name) || '' }}
+          echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
 
       - name: Install the app with its Windows backend
         run: |
@@ -61,17 +64,16 @@ jobs:
       - name: Zip
         shell: pwsh
         working-directory: desktop
-        run: Compress-Archive -Path "dist/AI Messaging" -DestinationPath "aim-desktop-windows.zip"
+        run: Compress-Archive -Path "dist/AI Messaging" -DestinationPath "aim-desktop-$env:VERSION-windows.zip"
 
       - uses: actions/upload-artifact@v4
         with:
           name: aim-desktop-windows
-          path: desktop/aim-desktop-windows.zip
+          path: desktop/aim-desktop-*-windows.zip
           if-no-files-found: error
 
       - name: Release (tags only)
-        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: desktop/aim-desktop-windows.zip
-          generate_release_notes: true
+          files: desktop/aim-desktop-*-windows.zip

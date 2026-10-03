@@ -238,7 +238,7 @@ ships), plus what only a host process can add:
   name, nothing else.
 
 Get `aim-desktop-windows.zip` from the *Desktop app (Windows)* workflow
-(or a `desktop-v*` release), unzip, run `AI Messaging.exe`. From source:
+(or the release for the version), unzip, run `AI Messaging.exe`. From source:
 `cd desktop && pip install -e . && aim-desktop`. Details, options and
 the page ↔ host contract: [desktop/README.md](desktop/README.md).
 
@@ -344,10 +344,21 @@ is too low fails in CI and not on somebody's older machine; the memory
 layer demo as a smoke test; wheel packaging; and pylint at 10/10. Every
 job prints `pip freeze`, so a failure is diagnosable from the log alone.
 
+**One version, one release.** Server, MCP client and desktop app carry
+the same version number: they ship together and check each other at
+runtime (the client compares the server's declared version with its own,
+the desktop app loads the UI the server serves). `VERSION` at the root
+is the source of truth; `python scripts/version.py set 0.15.2` writes it
+into every `pyproject.toml`, `__init__.py`, the manifest and the lock,
+and CI refuses a tree where any of them disagrees (`check`). To release:
+bump, commit, then `git tag v0.15.2 && git push origin v0.15.2` — the tag
+runs both build workflows and they attach `aim-mcp-0.15.2.mcpb` and
+`aim-desktop-0.15.2-windows.zip` to the same GitHub release.
+
 **Packaging the `.mcpb` extension bundle.** CI does it with the official
 CLI (`.github/workflows/mcpb.yml`): every pull request touching `mcp/`
 runs `mcpb validate` on the manifest, and every push to `main` (and
-every `mcp-v*` tag, as a release) runs `mcpb pack` and publishes
+every `v*` tag, into that version's release) runs `mcpb pack` and publishes
 `aim-mcp-<version>.mcpb` as a workflow artifact. The bundle is an
 artifact, never committed (`*.mcpb` is git-ignored); `mcp/.mcpbignore`
 keeps tests and caches out of it. Locally the same thing is

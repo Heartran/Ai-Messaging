@@ -10,6 +10,8 @@ from typing import Any
 
 import httpx
 
+from . import __version__
+
 # Oldest central-server API this client can talk to (identity continuity
 # via client_session_key and presence arrived in 0.3.0).
 MIN_SERVER_VERSION = "0.8.0"
@@ -17,7 +19,7 @@ MIN_SERVER_VERSION = "0.8.0"
 # The server version this client was built against. Any drift — in either
 # direction — is surfaced to the agent as a version_warning in the payload
 # (design §7): version skew must never masquerade as a mystery bug again.
-EXPECTED_SERVER_VERSION = "0.15.0"
+EXPECTED_SERVER_VERSION = __version__   # one project version (scripts/version.py)
 
 
 def _parse_version(version: str) -> tuple[int, ...]:

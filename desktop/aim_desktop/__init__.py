@@ -8,4 +8,4 @@ page stays the single UI (design §10.9): the app hosts it, it does not
 reimplement it.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.15.1"

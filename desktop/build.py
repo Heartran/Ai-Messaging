@@ -4,7 +4,7 @@ Produces `dist/AI Messaging/AI Messaging.exe` (one directory, no
 installer) with PyInstaller. Run it on Windows — the result is a Windows
 binary, and the WinRT notification modules only exist there. The
 `desktop.yml` workflow does exactly this on every push and publishes the
-zip as a build artifact (and as a release on `desktop-v*` tags).
+zip as a build artifact (and into the version's release on `v*` tags).
 
 Nothing machine-specific goes in: the server address is asked on first
 run and stored per user (design §12.1).

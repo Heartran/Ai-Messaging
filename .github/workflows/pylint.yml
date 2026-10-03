@@ -21,4 +21,4 @@ jobs:
           pip install -e ./server[dev] -e ./mcp[dev] -e ./desktop[dev] pylint
 
       - name: Analyse the code with pylint
-        run: pylint --fail-under=10 server/aim_server mcp/aim_mcp server/tests mcp/tests desktop/aim_desktop desktop/tests
+        run: pylint --fail-under=10 server/aim_server mcp/aim_mcp server/tests mcp/tests desktop/aim_desktop desktop/tests scripts

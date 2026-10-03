@@ -2,10 +2,11 @@ name: MCP bundle (.mcpb)
 
 # Two moments, two jobs. Before anything lands on main — on every pull
 # request touching the client — `mcpb validate` checks the manifest against
-# the official schema. After it lands (push to main) and on `mcp-v*` tags,
+# the official schema. After it lands (push to main) and on `v*` tags,
 # `mcpb pack` builds the bundle with the official CLI and publishes it as a
-# workflow artifact (and as a release on tags). The bundle is a product of
-# CI, not of somebody's machine.
+# workflow artifact (and, on tags, into the project's GitHub release for
+# that version, next to the Windows build). The bundle is a product of CI,
+# not of somebody's machine.
 
 on:
   pull_request:
@@ -14,10 +15,7 @@ on:
       - ".github/workflows/mcpb.yml"
   push:
     branches: [main]
-    tags: ["mcp-v*"]
-    paths:
-      - "mcp/**"
-      - ".github/workflows/mcpb.yml"
+    tags: ["v*"]
 
 # Least privilege: nothing here needs to write to the repository except
 # the release step, which gets it on its own job.
@@ -37,6 +35,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+
+      - name: One version across server, client and desktop
+        run: python3 scripts/version.py check ${{ startsWith(github.ref, 'refs/tags/') && format('--tag {0}', github.ref_name) || '' }}
 
       - name: Validate the manifest against the official schema
         run: npx --yes @anthropic-ai/mcpb@${MCPB_VERSION} validate mcp/manifest.json
@@ -59,7 +60,7 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # the release on mcp-v* tags
+      contents: write   # the release on v* tags
     steps:
       - uses: actions/checkout@v4
 
@@ -97,7 +98,7 @@ jobs:
           if-no-files-found: error
 
       - name: Release (tags only)
-        if: startsWith(github.ref, 'refs/tags/mcp-v')
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: aim-mcp-*.mcpb
